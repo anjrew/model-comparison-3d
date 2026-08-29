@@ -424,9 +424,13 @@ def main():
     st.plotly_chart(fig, width="stretch")
 
     st.subheader("Table")
-    st.dataframe(visible, width="stretch", hide_index=True)
-
-    st.caption(f"Showing all {len(visible):,} filtered models.")
+    table_search = st.text_input("Search table (matches any column)")
+    tbl = visible
+    if table_search:
+        mask = tbl.astype(str).apply(lambda col: col.str.contains(table_search, case=False, na=False)).any(axis=1)
+        tbl = tbl[mask]
+    st.dataframe(tbl, width="stretch", hide_index=True)
+    st.caption(f"Showing {len(tbl):,} of {len(visible):,} filtered models.")
 
 
 if __name__ == "__main__":
