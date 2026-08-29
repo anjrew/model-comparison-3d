@@ -1,3 +1,5 @@
+import math
+
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -15,6 +17,14 @@ AXES = {
 }
 
 DEFAULT_AXES = ["cost", "speed", "intelligence"]
+
+VALUE_SCALE = [
+    (0.00, "rgb(124,0,0)"),
+    (0.30, "rgb(190,30,45)"),
+    (0.55, "rgb(255,140,0)"),
+    (0.80, "rgb(255,230,0)"),
+    (1.00, "rgb(170,240,170)"),
+]
 
 
 @st.cache_data(ttl=3600, show_spinner="Loading model catalog from models.dev…")
@@ -94,6 +104,7 @@ def main():
         z_axis = st.selectbox("Z axis", list(AXES), index=2)
         log_x = st.checkbox("Log scale for cost", value=True)
         ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True)
+        color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True)
 
         st.divider()
 
@@ -168,13 +179,19 @@ def main():
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
 
+    if color_mode == "Value score":
+        clow, chigh = float(visible["cost"].min()), float(visible["cost"].max())
+        lo, hi = math.log10(max(clow, 1e-6)), math.log10(max(chigh, 1e-6))
+        span = (hi - lo) or 1
+        cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - lo) / span)))
+        visible = visible.copy()
+        visible["value"] = 0.34 * (visible["intelligence"] - 1) / 9 + 0.33 * (visible["speed"] - 1) / 9 + 0.33 * cheap
+        visible["value"] = visible["value"].clip(0, 1)
+
     if ball_size == "Parameters":
-        vals = visible["params"].dropna()
-        if len(vals):
-            vmin, vmax = vals.min(), vals.max()
-            lmin, lmax = max(vals.min(), 0.1), max(vals.max(), 0.1)
-            import math
-            lo, hi = math.log10(lmin), math.log10(lmax)
+        pvals = visible["params"].dropna()
+        if len(pvals):
+            lo, hi = math.log10(max(pvals.min(), 0.1)), math.log10(max(pvals.max(), 0.1))
             span = (hi - lo) or 1
             sizes = visible["params"].apply(
                 lambda p: 5 + 30 * (math.log10(max(p, 0.1)) - lo) / span if p and p == p else 8
@@ -196,22 +213,44 @@ def main():
     if live:
         hover_data["aa_intelligence_index"] = True
         hover_data["aa_tokens_per_sec"] = ":.1f"
+
+    use_continuous = color_mode == "Value score"
     if chart_type == "3D (WebGL)":
-        fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
-                            color="provider", color_discrete_map=color_map,
-                            hover_name="name", hover_data=hover_data,
-                            text=None, title=None)
-        fig.update_traces(marker=dict(size=sizes, opacity=0.55))
+        if use_continuous:
+            fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
+                                color="value", color_continuous_scale=VALUE_SCALE,
+                                range_color=(0, 1),
+                                hover_name="name", hover_data=hover_data,
+                                text=None, title=None)
+        else:
+            fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
+                                color="provider", color_discrete_map=color_map,
+                                hover_name="name", hover_data=hover_data,
+                                text=None, title=None)
+        fig.update_traces(marker=dict(size=sizes, opacity=0.45))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
-                          legend_title="Provider", height=750, margin=dict(l=0, r=0, t=30, b=0))
+                          height=750, margin=dict(l=0, r=0, t=30, b=0))
+        if use_continuous:
+            fig.update_coloraxes(colorbar=dict(title="Value", thickness=15))
+        else:
+            fig.update_layout(legend_title="Provider")
         if log_x and x_axis == "cost":
             fig.update_layout(scene=dict(xaxis=dict(type="log")))
     else:
-        fig = px.scatter(visible, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
-                         hover_name="name", hover_data=hover_data, title=None)
-        fig.update_traces(marker=dict(size=sizes, opacity=0.55))
+        if use_continuous:
+            fig = px.scatter(visible, x=x_axis, y=y_axis, color="value",
+                             color_continuous_scale=VALUE_SCALE, range_color=(0, 1),
+                             hover_name="name", hover_data=hover_data, title=None)
+        else:
+            fig = px.scatter(visible, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
+                             hover_name="name", hover_data=hover_data, title=None)
+        fig.update_traces(marker=dict(size=sizes, opacity=0.45))
         fig.update_layout(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
-                          legend_title="Provider", height=750, margin=dict(l=0, r=0, t=30, b=0))
+                          height=750, margin=dict(l=0, r=0, t=30, b=0))
+        if use_continuous:
+            fig.update_coloraxes(colorbar=dict(title="Value", thickness=15))
+        else:
+            fig.update_layout(legend_title="Provider")
         fig.add_annotation(text=size_label, xref="paper", yref="paper",
                            x=0, y=1.08, showarrow=False, font=dict(size=12), xanchor="left")
         if log_x and x_axis == "cost":

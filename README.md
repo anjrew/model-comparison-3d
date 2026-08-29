@@ -1,42 +1,41 @@
 # 3D Model Comparison
 
-Interactive Streamlit app plotting **7,000+ LLMs across 200+ providers** from the
-[models.dev](https://models.dev) API on a 3D chart — **cost, speed, intelligence**.
+Interactive Streamlit app comparing **7,000+ LLMs across 200+ providers** on a 3D chart.
 
-## Features
+Plot any of these on the axes: **cost, speed, intelligence, context**.
 
-- **Live data**: full model catalog + real pricing/context fetched from the models.dev API (keyless, cached 24h)
-- **Live speed & intelligence**: optionally provide an Artificial Analysis API key for real benchmark values; otherwise transparently-labeled estimates
-- 3D scatter (Plotly) with auto WebGL detection and a 2D fallback for browsers/VMs without WebGL
-- Swap any metric onto any axis (cost, speed, intelligence, context), log-scale for cost
-- Filter by search, provider, reasoning-only, open-weights, min context
-- Add/remove your own custom models
-
-## Getting an Artificial Analysis API key (free)
-
-Live speed & intelligence values come from [Artificial Analysis](https://artificialanalysis.ai).
-The **free tier** includes the intelligence index, speed, and pricing — 100 requests per day is plenty.
-
-1. Create an account / sign in at [artificialanalysis.ai](https://artificialanalysis.ai)
-2. Open your API access page: `https://artificialanalysis.ai/orgs/<your-username>/api-access`
-3. Create a key and copy it
-4. Paste it into the app's sidebar once — it is saved to `~/.config/model-compare/aa_key` and auto-loaded next launch
-
-## Run
+## Quick start
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
 Open http://localhost:8501
 
-## Data sources
+## Data
 
 | Metric | Source | Auth |
 | --- | --- | --- |
-| Catalog, pricing, context | [models.dev](https://models.dev) API | keyless |
-| Speed, intelligence | [Artificial Analysis](https://artificialanalysis.ai) API | optional key |
-| Speed, intelligence (fallback) | local estimates | — |
+| Catalog, pricing, context | [models.dev](https://models.dev) API | keyless, cached 24h |
+| Speed & intelligence | [Artificial Analysis](https://artificialanalysis.ai) API | free key (optional) |
+| Speed & intelligence (fallback) | local estimates | — |
+
+Models without published parameter counts get an estimate based on intelligence (shown as such in the table).
+
+## Free Artificial Analysis key (optional, recommended)
+
+Makes speed & intelligence live instead of estimated. Free tier: 100 requests/day.
+
+1. Sign up at [artificialanalysis.ai](https://artificialanalysis.ai)
+2. Open `https://artificialanalysis.ai/orgs/<your-username>/api-access`
+3. Create a key and paste it in the sidebar once — it's saved to `~/.config/model-compare/aa_key` and auto-loaded next launch
+
+## Chart controls
+
+- **Color by** — `Value score` (green = cheap + smart + fast, red = expensive + dumb + slow) or `Provider`
+- **Ball size** — parameters, z-axis value, or uniform
+- **Chart type** — Auto picks 3D when WebGL works, otherwise falls back to 2D
+- **Filters** — search, provider, reasoning-only, open-weights, min context
+- **Axes** — swap cost/speed/intelligence/context, log-scale cost
