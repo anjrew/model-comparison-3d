@@ -11,18 +11,7 @@
       try {
         const canvas = document.createElement("canvas");
         const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
-        if (!gl) return "no";
-        const vs = gl.createShader(gl.VERTEX_SHADER);
-        const fs = gl.createShader(gl.FRAGMENT_SHADER);
-        gl.shaderSource(vs, "attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}");
-        gl.shaderSource(fs, "void main(){gl_FragColor=vec4(1.,0.,0.,1.);}");
-        gl.compileShader(vs);
-        gl.compileShader(fs);
-        const prog = gl.createProgram();
-        gl.attachShader(prog, vs);
-        gl.attachShader(prog, fs);
-        gl.linkProgram(prog);
-        return gl.getProgramParameter(prog, gl.LINK_STATUS) && !gl.getError() ? "yes" : "no";
+        return gl ? "yes" : "no";
       } catch (e) {
         return "no";
       }
