@@ -1,15 +1,16 @@
 # 3D Model Comparison
 
-An interactive Streamlit app that plots the best current LLMs across providers on a 3D chart comparing **cost**, **speed**, and **intelligence**.
+Interactive Streamlit app plotting **7,000+ LLMs across 200+ providers** from the
+[models.dev](https://models.dev) API on a 3D chart — **cost, speed, intelligence**.
 
 ## Features
 
-- 3D scatter chart (Plotly) of models colored by provider
-- **Auto WebGL detection**: falls back to a 2D bubble chart automatically when the browser has WebGL disabled (e.g. VMs, remote desktops)
-- Swap any metric onto any axis (cost, speed, intelligence)
-- Log scale toggle for cost
-- Add and remove models and providers from the sidebar
-- Reset to the default model catalog
+- **Live data**: full model catalog + real pricing/context fetched from the models.dev API (keyless, cached 24h)
+- **Live speed & intelligence**: optionally provide an Artificial Analysis API key for real benchmark values; otherwise transparently-labeled estimates
+- 3D scatter (Plotly) with auto WebGL detection and a 2D fallback for browsers/VMs without WebGL
+- Swap any metric onto any axis (cost, speed, intelligence, context), log-scale for cost
+- Filter by search, provider, reasoning-only, open-weights, min context
+- Add/remove your own custom models
 
 ## Run
 
@@ -22,8 +23,10 @@ streamlit run app.py
 
 Open http://localhost:8501
 
-## Metrics
+## Data sources
 
-- **Cost**: USD per 1M input tokens (approx.)
-- **Speed**: relative output speed, 1-10
-- **Intelligence**: coding/reasoning capability, 1-10
+| Metric | Source | Auth |
+| --- | --- | --- |
+| Catalog, pricing, context | [models.dev](https://models.dev) API | keyless |
+| Speed, intelligence | [Artificial Analysis](https://artificialanalysis.ai) API | optional key |
+| Speed, intelligence (fallback) | local estimates | — |
