@@ -64,6 +64,7 @@ def main():
         )
 
         detected = webgl_check()
+        st.caption(f"WebGL status: {'detecting…' if detected is None else detected}")
         if chart_mode == "Auto":
             if detected == "yes":
                 chart_type = "3D (WebGL)"
