@@ -250,7 +250,11 @@ def main():
 
         reasoning_only = st.checkbox("Reasoning models only", value=False)
         open_weights = st.checkbox("Open-weights only", value=False)
-        min_context = st.slider("Min context (K tokens)", 0, 1024, 0, 16)
+        ctx_c1, ctx_c2 = st.columns(2)
+        with ctx_c1:
+            min_context = st.number_input("Min context (K tokens)", min_value=0, step=16, value=0)
+        with ctx_c2:
+            max_context = st.number_input("Max context (K tokens)", min_value=0, step=16, value=0)
 
         st.divider()
 
@@ -299,6 +303,8 @@ def main():
         visible = visible[visible["open_weights"]]
     if min_context:
         visible = visible[visible["context"] >= min_context * 1000]
+    if max_context:
+        visible = visible[visible["context"] <= max_context * 1000]
     visible = visible.sort_values("intelligence", ascending=False).reset_index(drop=True)
 
     if visible.empty:
