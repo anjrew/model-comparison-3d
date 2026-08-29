@@ -1,4 +1,4 @@
-# 3D Model Comparison
+# 3D LLM Model Comparison
 
 Interactive Streamlit app comparing **7,000+ LLMs across 200+ providers** on a 3D chart.
 

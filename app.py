@@ -100,7 +100,7 @@ def get_aa(key):
 
 
 def main():
-    st.set_page_config(page_title="Model Compare 3D", page_icon="📊", layout="wide")
+    st.set_page_config(page_title="LLM 3D Model Compare", page_icon="📊", layout="wide")
 
     if "custom_models" not in st.session_state:
         st.session_state.custom_models = []
@@ -272,7 +272,7 @@ def main():
         st.warning("No models match the current filters.")
         return
 
-    st.title("📊 3D Model Comparison")
+    st.title("📊 3D LLM Model Comparison")
     st.caption(f"{len(visible):,} models shown. Hover for details; drag to rotate.")
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
