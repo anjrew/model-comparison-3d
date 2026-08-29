@@ -78,12 +78,21 @@ def main():
 
         st.subheader("🔎 Filter")
         search = st.text_input("Search model name")
-        all_providers = st.checkbox("All providers", value=True)
         providers = sorted(df["provider"].unique())
-        if all_providers:
-            sel_providers = providers
-        else:
-            sel_providers = st.multiselect("Pick providers", providers, default=[])
+
+        show_all = st.checkbox("Show all providers", value=True)
+        sel_providers = []
+        if not show_all:
+            with st.expander(f"Choose providers ({len(providers):,})"):
+                prov_search = st.text_input("Search providers")
+                opts = [p for p in providers if prov_search.lower() in p.lower()]
+                sel_providers = st.multiselect("Providers to show (empty = all)", opts)
+                st.caption(f"Found {len(opts):,} matching providers.")
+
+        with st.expander(f"Browse all {len(providers):,} providers"):
+            counts = df.groupby("provider").size().sort_values(ascending=False).rename("models")
+            st.dataframe(counts, width="stretch")
+
         reasoning_only = st.checkbox("Reasoning models only", value=False)
         open_weights = st.checkbox("Open-weights only", value=False)
         min_context = st.slider("Min context (K tokens)", 0, 1024, 0, 16)
@@ -119,7 +128,7 @@ def main():
     visible = df
     if search:
         visible = visible[visible["name"].str.contains(search, case=False, na=False)]
-    if not all_providers and sel_providers:
+    if not show_all and sel_providers:
         visible = visible[visible["provider"].isin(sel_providers)]
     if reasoning_only:
         visible = visible[visible["reasoning"]]
