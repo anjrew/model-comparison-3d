@@ -47,7 +47,11 @@ def _axis_ticks(vals, log=False, steps=6):
 
 
 def _axis_step(axis):
-    return {"cost": 0.1, "speed": 0.5, "intelligence": 0.5, "context": 1000}.get(axis, 1.0)
+    return {"cost": 1e-6, "speed": 1e-6, "intelligence": 1e-6, "context": 1000}.get(axis, 1e-6)
+
+
+def _axis_format(axis):
+    return {"cost": "%.6f", "speed": "%.6f", "intelligence": "%.6f", "context": "%.0f"}.get(axis, "%.6f")
 
 
 def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x):
@@ -221,9 +225,9 @@ def main():
             for dim, ax in (("X", x_axis), ("Y", y_axis), ("Z", z_axis)):
                 c1, c2 = st.columns(2)
                 with c1:
-                    st.number_input(f"{dim} min ({ax})", value=None, step=_axis_step(ax), key=f"rng_{ax}_min")
+                    st.number_input(f"{dim} min ({ax})", value=None, step=_axis_step(ax), format=_axis_format(ax), key=f"rng_{ax}_min")
                 with c2:
-                    st.number_input(f"{dim} max ({ax})", value=None, step=_axis_step(ax), key=f"rng_{ax}_max")
+                    st.number_input(f"{dim} max ({ax})", value=None, step=_axis_step(ax), format=_axis_format(ax), key=f"rng_{ax}_max")
 
         st.divider()
 
