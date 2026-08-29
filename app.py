@@ -114,10 +114,10 @@ def main():
     if log_x and x_axis == "cost":
         fig.update_layout(scene=dict(xaxis=dict(type="log")))
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.subheader("Table")
-    st.dataframe(visible.sort_values("intelligence", ascending=False), use_container_width=True, hide_index=True)
+    st.dataframe(visible.sort_values("intelligence", ascending=False), width="stretch", hide_index=True)
 
     st.caption(f"Showing {len(visible)} models across {visible['provider'].nunique()} providers.")
 
