@@ -46,6 +46,26 @@ def _axis_ticks(vals, log=False, steps=6):
     return np.linspace(lo, hi, steps)
 
 
+def _axis_step(axis):
+    return {"cost": 0.1, "speed": 0.5, "intelligence": 0.5, "context": 1000}.get(axis, 1.0)
+
+
+def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x):
+    for dim, ax in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
+        lo = st.session_state.get(f"rng_{ax}_min")
+        hi = st.session_state.get(f"rng_{ax}_max")
+        if lo is None and hi is None:
+            continue
+        is_log = ax == "cost" and log_x
+        lv = math.log10(lo) if (is_log and lo is not None) else lo
+        hv = math.log10(hi) if (is_log and hi is not None) else hi
+        rng = [lv if lo is not None else None, hv if hi is not None else None]
+        if chart_type == "3D (WebGL)":
+            fig.update_layout(scene={f"{dim}axis": dict(range=rng)})
+        elif dim != "z":
+            getattr(fig, f"update_{dim}axes")(range=rng)
+
+
 def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, steps=10):
     med = visible[["cost", "intelligence", "speed"]].median()
     ticks = {
@@ -195,6 +215,15 @@ def main():
                   on_change=_w_cb, kwargs={"kc": "w_intel"})
         w_cost, w_speed, w_intel = st.session_state.w_cost, st.session_state.w_speed, st.session_state.w_intel
         st.caption(f"{w_cost}% + {w_speed}% + {w_intel}% = {w_cost + w_speed + w_intel}% (= {(w_cost + w_speed + w_intel) / 100:.2f})")
+
+        with st.expander("Axis ranges (override)"):
+            st.caption("Leave blank to auto-scale.")
+            for dim, ax in (("X", x_axis), ("Y", y_axis), ("Z", z_axis)):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.number_input(f"{dim} min ({ax})", value=None, step=_axis_step(ax), key=f"rng_{ax}_min")
+                with c2:
+                    st.number_input(f"{dim} max ({ax})", value=None, step=_axis_step(ax), key=f"rng_{ax}_max")
 
         st.divider()
 
@@ -379,6 +408,8 @@ def main():
                            x=0, y=1.08, showarrow=False, font=dict(size=12), xanchor="left")
         if log_x and x_axis == "cost":
             fig.update_xaxes(type="log")
+
+    _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x)
 
     st.plotly_chart(fig, width="stretch")
 
