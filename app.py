@@ -29,10 +29,11 @@ VALUE_SCALE = [
 ]
 
 
-def _score(cost_v, intel_v, speed_v, clow_log, chi_log):
+def _score(cost_v, intel_v, speed_v, clow_log, chi_log, w_cost, w_speed, w_intel):
     cspan = (chi_log - clow_log) or 1
     cheap = 1 - min(1, max(0, (math.log10(max(cost_v, 1e-6)) - clow_log) / cspan))
-    return 0.34 * (intel_v - 1) / 9 + 0.33 * (speed_v - 1) / 9 + 0.33 * cheap
+    wsum = max(w_cost + w_speed + w_intel, 1e-9)
+    return (w_cost * cheap + w_speed * (speed_v - 1) / 9 + w_intel * (intel_v - 1) / 9) / wsum
 
 
 def _axis_ticks(vals, log=False, steps=6):
@@ -45,7 +46,7 @@ def _axis_ticks(vals, log=False, steps=6):
     return np.linspace(lo, hi, steps)
 
 
-def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, steps=6):
+def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, steps=6):
     med = visible[["cost", "intelligence", "speed"]].median()
     ticks = {
         x_axis: _axis_ticks(visible[x_axis], log=log_x and x_axis == "cost", steps=steps),
@@ -70,7 +71,7 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, steps=6):
                 c = grids["cost"][idxs[slot_for.get("cost", 0)]]
                 a = grids["intelligence"][idxs[slot_for.get("intelligence", 0)]]
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
-                vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, clow_log, chi_log)))
+                vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, clow_log, chi_log, w_cost, w_speed, w_intel)))
 
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
@@ -165,6 +166,11 @@ def main():
         color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1)
         show_field = st.checkbox("Show value field (3D gradient)", value=True)
 
+        st.caption("⚖️ Value weights — tilt the gradient toward what matters")
+        w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
+        w_speed = st.slider("Speed weight", 0, 100, 33, key="w_speed")
+        w_intel = st.slider("Intelligence weight", 0, 100, 34, key="w_intel")
+
         st.divider()
 
         st.subheader("🔎 Filter")
@@ -243,7 +249,8 @@ def main():
     span = (hi - lo) or 1
     cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - lo) / span)))
     visible = visible.copy()
-    visible["value"] = 0.34 * (visible["intelligence"] - 1) / 9 + 0.33 * (visible["speed"] - 1) / 9 + 0.33 * cheap
+    wsum = max(w_cost + w_speed + w_intel, 1)
+    visible["value"] = (w_cost * cheap + w_speed * (visible["speed"] - 1) / 9 + w_intel * (visible["intelligence"] - 1) / 9) / wsum
     visible["value"] = visible["value"].clip(0, 1)
 
     if ball_size == "Parameters":
@@ -286,7 +293,7 @@ def main():
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         if show_field and len(visible) >= 4:
-            fig.add_trace(build_value_volume(visible, x_axis, y_axis, z_axis, log_x))
+            fig.add_trace(build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel))
         fig.update_traces(marker=dict(size=sizes, opacity=0.45), selector=dict(type="scatter3d"))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
                           height=750, margin=dict(l=0, r=0, t=30, b=0))
