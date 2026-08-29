@@ -65,10 +65,10 @@ def main():
 
         detected = webgl_check()
         if chart_mode == "Auto":
-            if detected == "no":
-                chart_type = "2D (fallback)"
-            else:
+            if detected == "yes":
                 chart_type = "3D (WebGL)"
+            else:
+                chart_type = "2D (fallback)"
         else:
             chart_type = chart_mode
         if detected == "no" and chart_type == "3D (WebGL)":
