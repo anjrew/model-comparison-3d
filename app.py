@@ -48,7 +48,9 @@ def main():
         type="password",
         key="aa_key_input",
         on_change=_aa_key_cb,
-        help="Saved to ~/.config/model-compare/aa_key and auto-loaded next launch.",
+        help="Get a free key: sign up at artificialanalysis.ai, then open "
+             "https://artificialanalysis.ai/orgs/<your-username>/api-access, create a key, "
+             "and paste it here. Saved to ~/.config/model-compare/aa_key.",
     )
     if st.sidebar.button("Clear saved key"):
         st.session_state.aa_key_input = ""

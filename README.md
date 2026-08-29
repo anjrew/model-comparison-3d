@@ -12,6 +12,16 @@ Interactive Streamlit app plotting **7,000+ LLMs across 200+ providers** from th
 - Filter by search, provider, reasoning-only, open-weights, min context
 - Add/remove your own custom models
 
+## Getting an Artificial Analysis API key (free)
+
+Live speed & intelligence values come from [Artificial Analysis](https://artificialanalysis.ai).
+The **free tier** includes the intelligence index, speed, and pricing — 100 requests per day is plenty.
+
+1. Create an account / sign in at [artificialanalysis.ai](https://artificialanalysis.ai)
+2. Open your API access page: `https://artificialanalysis.ai/orgs/<your-username>/api-access`
+3. Create a key and copy it
+4. Paste it into the app's sidebar once — it is saved to `~/.config/model-compare/aa_key` and auto-loaded next launch
+
 ## Run
 
 ```bash
