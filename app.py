@@ -70,9 +70,10 @@ def main():
 
         st.subheader("🎚️ Axes")
         x_axis = st.selectbox("X axis", list(AXES), index=0)
-        y_axis = st.selectbox("Y axis", list(AXES), index=DEFAULT_AXES.index("speed"))
-        z_axis = st.selectbox("Z axis", list(AXES), index=DEFAULT_AXES.index("intelligence"))
+        y_axis = st.selectbox("Y axis", list(AXES), index=1)
+        z_axis = st.selectbox("Z axis", list(AXES), index=2)
         log_x = st.checkbox("Log scale for cost", value=True)
+        ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True)
 
         st.divider()
 
@@ -147,27 +148,48 @@ def main():
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
 
-    hover_data = {"cost": ":.2f", "speed": True, "intelligence": True, "context": True, "reasoning": True}
+    if ball_size == "Parameters":
+        vals = visible["params"].dropna()
+        if len(vals):
+            vmin, vmax = vals.min(), vals.max()
+            lmin, lmax = max(vals.min(), 0.1), max(vals.max(), 0.1)
+            import math
+            lo, hi = math.log10(lmin), math.log10(lmax)
+            span = (hi - lo) or 1
+            sizes = visible["params"].apply(
+                lambda p: 5 + 30 * (math.log10(max(p, 0.1)) - lo) / span if p and p == p else 8
+            )
+        else:
+            sizes = pd.Series([8] * len(visible), index=visible.index)
+        size_label = "Ball size = parameters (B)"
+    elif ball_size == "Z-axis value":
+        vmin, vmax = visible[z_axis].min(), visible[z_axis].max()
+        span = (vmax - vmin) or 1
+        sizes = 5 + 25 * (visible[z_axis] - vmin) / span
+        size_label = f"Ball size = {AXES[z_axis]}"
+    else:
+        sizes = pd.Series([8] * len(visible), index=visible.index)
+        size_label = "Uniform ball size"
+
+    hover_data = {"cost": ":.2f", "speed": True, "intelligence": True, "context": True,
+                  "reasoning": True, "params": ":.1f"}
     if chart_type == "3D (WebGL)":
         fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
                             color="provider", color_discrete_map=color_map,
                             hover_name="name", hover_data=hover_data,
                             text=None, title=None)
-        fig.update_traces(marker=dict(size=5, opacity=0.55))
+        fig.update_traces(marker=dict(size=sizes, opacity=0.55))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
                           legend_title="Provider", height=750, margin=dict(l=0, r=0, t=30, b=0))
         if log_x and x_axis == "cost":
             fig.update_layout(scene=dict(xaxis=dict(type="log")))
     else:
-        vmin, vmax = visible[z_axis].min(), visible[z_axis].max()
-        span = (vmax - vmin) or 1
-        sizes = 5 + 25 * (visible[z_axis] - vmin) / span
         fig = px.scatter(visible, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                          hover_name="name", hover_data=hover_data, title=None)
         fig.update_traces(marker=dict(size=sizes, opacity=0.55))
         fig.update_layout(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
                           legend_title="Provider", height=750, margin=dict(l=0, r=0, t=30, b=0))
-        fig.add_annotation(text=f"Bubble size = {AXES[z_axis]}", xref="paper", yref="paper",
+        fig.add_annotation(text=size_label, xref="paper", yref="paper",
                            x=0, y=1.08, showarrow=False, font=dict(size=12), xanchor="left")
         if log_x and x_axis == "cost":
             fig.update_xaxes(type="log")

@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 import urllib.request
 
@@ -44,6 +45,18 @@ def fetch_models_dev(force=False):
     return data
 
 
+_T_PARAM_RE = re.compile(r"(?<![a-z0-9])(\d+(?:\.\d+)?)\s*t(?:[^a-z]|$)")
+_B_PARAM_RE = re.compile(r"(?<![a-z0-9])(\d+(?:\.\d+)?)\s*b(?:[^a-z]|$)")
+
+
+def parse_params(name, mid):
+    s = f"{name} {mid}".lower()
+    ts = [float(x) for x in _T_PARAM_RE.findall(s)]
+    bs = [float(x) for x in _B_PARAM_RE.findall(s)]
+    vals = [t * 1000 for t in ts] + bs
+    return max(vals) if vals else None
+
+
 def load_catalog(force=False):
     data = fetch_models_dev(force=force)
     models = []
@@ -62,6 +75,7 @@ def load_catalog(force=False):
                 "cost": inp,
                 "cost_out": cost.get("output"),
                 "context": ctx or 0,
+                "params": parse_params(m.get("name") or mid, mid),
                 "reasoning": bool(m.get("reasoning")),
                 "open_weights": bool(m.get("open_weights")),
                 "release_date": m.get("release_date"),
