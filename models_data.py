@@ -1,0 +1,31 @@
+DEFAULT_MODELS = [
+    {"name": "Claude Opus 4.5", "provider": "Anthropic", "cost": 5.00, "speed": 3, "intelligence": 9.8},
+    {"name": "Claude Sonnet 4.5", "provider": "Anthropic", "cost": 3.00, "speed": 6, "intelligence": 9.2},
+    {"name": "Claude Haiku 4.5", "provider": "Anthropic", "cost": 1.00, "speed": 9, "intelligence": 8.0},
+    {"name": "GPT 5.2", "provider": "OpenAI", "cost": 1.25, "speed": 5, "intelligence": 9.5},
+    {"name": "GPT 5.1 Codex", "provider": "OpenAI", "cost": 1.25, "speed": 4, "intelligence": 9.6},
+    {"name": "GPT 5 Mini", "provider": "OpenAI", "cost": 0.25, "speed": 9, "intelligence": 7.8},
+    {"name": "Gemini 3 Pro", "provider": "Google", "cost": 2.00, "speed": 7, "intelligence": 9.3},
+    {"name": "Gemini 2.5 Flash", "provider": "Google", "cost": 0.30, "speed": 10, "intelligence": 7.5},
+    {"name": "DeepSeek V4 Flash", "provider": "DeepSeek", "cost": 0.28, "speed": 8, "intelligence": 8.2},
+    {"name": "DeepSeek V4 Pro", "provider": "DeepSeek", "cost": 0.60, "speed": 6, "intelligence": 9.0},
+    {"name": "Minimax M2.1", "provider": "MiniMax", "cost": 0.10, "speed": 9, "intelligence": 8.8},
+    {"name": "Kimi K2", "provider": "Moonshot", "cost": 0.60, "speed": 8, "intelligence": 8.7},
+    {"name": "Qwen3 Coder", "provider": "Alibaba", "cost": 0.30, "speed": 8, "intelligence": 8.5},
+    {"name": "Llama 4", "provider": "Meta", "cost": 0.25, "speed": 7, "intelligence": 7.8},
+    {"name": "Grok 4", "provider": "xAI", "cost": 3.00, "speed": 5, "intelligence": 9.1},
+]
+
+PROVIDER_COLORS = {
+    "Anthropic": "#D97757",
+    "OpenAI": "#10A37F",
+    "Google": "#4285F4",
+    "DeepSeek": "#4D6BFE",
+    "MiniMax": "#7C3AED",
+    "Moonshot": "#0EA5E9",
+    "Alibaba": "#F59E0B",
+    "Meta": "#1D4ED8",
+    "xAI": "#64748B",
+    "Mistral": "#FF7000",
+    "Other": "#94A3B8",
+}
