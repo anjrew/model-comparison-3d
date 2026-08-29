@@ -72,7 +72,7 @@ def main():
         x_axis = st.selectbox("X axis", list(AXES), index=0)
         y_axis = st.selectbox("Y axis", list(AXES), index=DEFAULT_AXES.index("speed"))
         z_axis = st.selectbox("Z axis", list(AXES), index=DEFAULT_AXES.index("intelligence"))
-        log_x = st.checkbox("Log scale for cost", value=False)
+        log_x = st.checkbox("Log scale for cost", value=True)
 
         st.divider()
 
@@ -153,26 +153,31 @@ def main():
                             color="provider", color_discrete_map=color_map,
                             hover_name="name", hover_data=hover_data,
                             text=None, title=None)
-        fig.update_traces(marker=dict(size=5))
+        fig.update_traces(marker=dict(size=5, opacity=0.55))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
                           legend_title="Provider", height=750, margin=dict(l=0, r=0, t=30, b=0))
         if log_x and x_axis == "cost":
             fig.update_layout(scene=dict(xaxis=dict(type="log")))
     else:
+        vmin, vmax = visible[z_axis].min(), visible[z_axis].max()
+        span = (vmax - vmin) or 1
+        sizes = 5 + 25 * (visible[z_axis] - vmin) / span
         fig = px.scatter(visible, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                          hover_name="name", hover_data=hover_data, title=None)
-        fig.update_traces(marker=dict(size=6), textposition="top center")
+        fig.update_traces(marker=dict(size=sizes, opacity=0.55))
         fig.update_layout(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
                           legend_title="Provider", height=750, margin=dict(l=0, r=0, t=30, b=0))
+        fig.add_annotation(text=f"Bubble size = {AXES[z_axis]}", xref="paper", yref="paper",
+                           x=0, y=1.08, showarrow=False, font=dict(size=12), xanchor="left")
         if log_x and x_axis == "cost":
             fig.update_xaxes(type="log")
 
     st.plotly_chart(fig, width="stretch")
 
     st.subheader("Table")
-    st.dataframe(visible.head(500), width="stretch", hide_index=True)
+    st.dataframe(visible, width="stretch", hide_index=True)
 
-    st.caption(f"Showing {min(len(visible), 500)} of {len(visible):,} models.")
+    st.caption(f"Showing all {len(visible):,} filtered models.")
 
 
 if __name__ == "__main__":
