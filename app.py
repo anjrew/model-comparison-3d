@@ -1,9 +1,11 @@
 import math
 
+import numpy as np
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 import models_api as api
 
@@ -25,6 +27,61 @@ VALUE_SCALE = [
     (0.80, "rgb(255,230,0)"),
     (1.00, "rgb(170,240,170)"),
 ]
+
+
+def _score(cost_v, intel_v, speed_v, clow_log, chi_log):
+    cspan = (chi_log - clow_log) or 1
+    cheap = 1 - min(1, max(0, (math.log10(max(cost_v, 1e-6)) - clow_log) / cspan))
+    return 0.34 * (intel_v - 1) / 9 + 0.33 * (speed_v - 1) / 9 + 0.33 * cheap
+
+
+def _axis_ticks(vals, log=False, steps=6):
+    lo, hi = float(vals.min()), float(vals.max())
+    if hi <= lo:
+        lo, hi = lo - 1, hi + 1
+    if log:
+        lo, hi = max(lo, 1e-6), max(hi, 1e-6)
+        return np.logspace(np.log10(lo), np.log10(hi), steps)
+    return np.linspace(lo, hi, steps)
+
+
+def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, steps=6):
+    med = visible[["cost", "intelligence", "speed"]].median()
+    ticks = {
+        x_axis: _axis_ticks(visible[x_axis], log=log_x and x_axis == "cost", steps=steps),
+        y_axis: _axis_ticks(visible[y_axis], log=False, steps=steps),
+        z_axis: _axis_ticks(visible[z_axis], log=False, steps=steps),
+    }
+    grids = {
+        "cost": ticks.get("cost", np.full(steps, med["cost"])),
+        "intelligence": ticks.get("intelligence", np.full(steps, med["intelligence"])),
+        "speed": ticks.get("speed", np.full(steps, med["speed"])),
+    }
+    slot_for = {x_axis: 0, y_axis: 1, z_axis: 2}
+
+    xx, yy, zz = np.meshgrid(ticks[x_axis], ticks[y_axis], ticks[z_axis], indexing="ij")
+    clow_log = math.log10(max(float(visible["cost"].min()), 1e-6))
+    chi_log = math.log10(max(float(visible["cost"].max()), 1e-6))
+    vv = np.empty_like(xx, dtype=float)
+    for i in range(steps):
+        for j in range(steps):
+            for k in range(steps):
+                idxs = (i, j, k)
+                c = grids["cost"][idxs[slot_for.get("cost", 0)]]
+                a = grids["intelligence"][idxs[slot_for.get("intelligence", 0)]]
+                s = grids["speed"][idxs[slot_for.get("speed", 0)]]
+                vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, clow_log, chi_log)))
+
+    return go.Volume(
+        x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
+        value=vv.ravel(),
+        isomin=0.05, isomax=1.0,
+        opacity=0.10,
+        surface_count=12,
+        colorscale=VALUE_SCALE,
+        showscale=False,
+        caps=dict(x_show=False, y_show=False, z_show=False),
+    )
 
 
 @st.cache_data(ttl=3600, show_spinner="Loading model catalog from models.dev…")
@@ -104,7 +161,8 @@ def main():
         z_axis = st.selectbox("Z axis", list(AXES), index=2)
         log_x = st.checkbox("Log scale for cost", value=True)
         ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True)
-        color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True)
+        color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1)
+        show_field = st.checkbox("Show value field (3D gradient)", value=True)
 
         st.divider()
 
@@ -179,14 +237,13 @@ def main():
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
 
-    if color_mode == "Value score":
-        clow, chigh = float(visible["cost"].min()), float(visible["cost"].max())
-        lo, hi = math.log10(max(clow, 1e-6)), math.log10(max(chigh, 1e-6))
-        span = (hi - lo) or 1
-        cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - lo) / span)))
-        visible = visible.copy()
-        visible["value"] = 0.34 * (visible["intelligence"] - 1) / 9 + 0.33 * (visible["speed"] - 1) / 9 + 0.33 * cheap
-        visible["value"] = visible["value"].clip(0, 1)
+    clow, chigh = float(visible["cost"].min()), float(visible["cost"].max())
+    lo, hi = math.log10(max(clow, 1e-6)), math.log10(max(chigh, 1e-6))
+    span = (hi - lo) or 1
+    cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - lo) / span)))
+    visible = visible.copy()
+    visible["value"] = 0.34 * (visible["intelligence"] - 1) / 9 + 0.33 * (visible["speed"] - 1) / 9 + 0.33 * cheap
+    visible["value"] = visible["value"].clip(0, 1)
 
     if ball_size == "Parameters":
         pvals = visible["params"].dropna()
@@ -227,7 +284,9 @@ def main():
                                 color="provider", color_discrete_map=color_map,
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
-        fig.update_traces(marker=dict(size=sizes, opacity=0.45))
+        if show_field and len(visible) >= 4:
+            fig.add_trace(build_value_volume(visible, x_axis, y_axis, z_axis, log_x))
+        fig.update_traces(marker=dict(size=sizes, opacity=0.45), selector=dict(type="scatter3d"))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
                           height=750, margin=dict(l=0, r=0, t=30, b=0))
         if use_continuous:
