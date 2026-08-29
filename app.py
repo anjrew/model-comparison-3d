@@ -21,11 +21,11 @@ AXES = {
 DEFAULT_AXES = ["cost", "speed", "intelligence"]
 
 VALUE_SCALE = [
-    (0.00, "rgb(124,0,0)"),
-    (0.30, "rgb(190,30,45)"),
-    (0.55, "rgb(255,140,0)"),
-    (0.80, "rgb(255,230,0)"),
-    (1.00, "rgb(170,240,170)"),
+    (0.00, "rgb(110,0,0)"),
+    (0.30, "rgb(200,30,40)"),
+    (0.55, "rgb(255,150,30)"),
+    (0.80, "rgb(250,230,0)"),
+    (1.00, "rgb(70,200,80)"),
 ]
 
 
@@ -75,9 +75,10 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, steps=6):
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
         value=vv.ravel(),
-        isomin=0.05, isomax=1.0,
-        opacity=0.10,
-        surface_count=12,
+        cmin=float(vv.min()), cmax=float(vv.max()),
+        isomin=float(vv.min()), isomax=float(vv.max()),
+        opacity=0.15,
+        surface_count=14,
         colorscale=VALUE_SCALE,
         showscale=False,
         caps=dict(x_show=False, y_show=False, z_show=False),
