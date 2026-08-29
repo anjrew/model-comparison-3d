@@ -46,7 +46,7 @@ def _axis_ticks(vals, log=False, steps=6):
     return np.linspace(lo, hi, steps)
 
 
-def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, steps=6):
+def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, steps=9):
     med = visible[["cost", "intelligence", "speed"]].median()
     ticks = {
         x_axis: _axis_ticks(visible[x_axis], log=log_x and x_axis == "cost", steps=steps),
@@ -73,15 +73,22 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
                 vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, clow_log, chi_log, w_cost, w_speed, w_intel)))
 
+    def locs(t):
+        t = np.asarray(t, dtype=float)
+        return [float(t[0]), float(t[len(t) // 2]), float(t[-1])]
+
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
         value=vv.ravel(),
         cmin=float(vv.min()), cmax=float(vv.max()),
-        isomin=float(vv.min()), isomax=float(vv.max()),
-        opacity=0.12,
-        surface_count=45,
+        opacity=0.25,
         colorscale=VALUE_SCALE,
         showscale=False,
+        slices=dict(
+            x=dict(show=True, locations=locs(ticks[x_axis])),
+            y=dict(show=True, locations=locs(ticks[y_axis])),
+            z=dict(show=True, locations=locs(ticks[z_axis])),
+        ),
         caps=dict(x_show=False, y_show=False, z_show=False),
     )
 
