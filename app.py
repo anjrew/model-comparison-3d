@@ -78,8 +78,8 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
         value=vv.ravel(),
         cmin=float(vv.min()), cmax=float(vv.max()),
         isomin=float(vv.min()), isomax=float(vv.max()),
-        opacity=0.15,
-        surface_count=14,
+        opacity=0.12,
+        surface_count=45,
         colorscale=VALUE_SCALE,
         showscale=False,
         caps=dict(x_show=False, y_show=False, z_show=False),
@@ -167,9 +167,35 @@ def main():
         show_field = st.checkbox("Show value field (3D gradient)", value=True)
 
         st.caption("⚖️ Value weights — tilt the gradient toward what matters")
-        w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
-        w_speed = st.slider("Speed weight", 0, 100, 33, key="w_speed")
-        w_intel = st.slider("Intelligence weight", 0, 100, 34, key="w_intel")
+        _TOTAL_W = 100
+        for _k, _d in (("w_cost", 33), ("w_speed", 33), ("w_intel", 34)):
+            if _k not in st.session_state:
+                st.session_state[_k] = _d
+
+        def _w_cb(kc):
+            others = [k for k in ("w_cost", "w_speed", "w_intel") if k != kc]
+            v = max(0, min(100, int(st.session_state[kc])))
+            remaining = _TOTAL_W - v
+            other_old = sum(st.session_state[o] for o in others)
+            if other_old <= 0:
+                for i, o in enumerate(others):
+                    st.session_state[o] = remaining // len(others) + (1 if i < remaining % len(others) else 0)
+            else:
+                for o in others:
+                    st.session_state[o] = round(st.session_state[o] / other_old * remaining)
+                diff = _TOTAL_W - (v + sum(st.session_state[o] for o in others))
+                biggest = max(others, key=lambda o: st.session_state[o])
+                st.session_state[biggest] = max(0, st.session_state[biggest] + diff)
+            st.rerun()
+
+        st.slider("Cheapness (cost) weight", 0, _TOTAL_W, key="w_cost",
+                  on_change=_w_cb, kwargs={"kc": "w_cost"})
+        st.slider("Speed weight", 0, _TOTAL_W, key="w_speed",
+                  on_change=_w_cb, kwargs={"kc": "w_speed"})
+        st.slider("Intelligence weight", 0, _TOTAL_W, key="w_intel",
+                  on_change=_w_cb, kwargs={"kc": "w_intel"})
+        st.caption(f"Total: {st.session_state.w_cost + st.session_state.w_speed + st.session_state.w_intel} / 100")
+        w_cost, w_speed, w_intel = st.session_state.w_cost, st.session_state.w_speed, st.session_state.w_intel
 
         st.divider()
 
@@ -193,6 +219,14 @@ def main():
         reasoning_only = st.checkbox("Reasoning models only", value=False)
         open_weights = st.checkbox("Open-weights only", value=False)
         min_context = st.slider("Min context (K tokens)", 0, 1024, 0, 16)
+
+        st.divider()
+
+        st.subheader("⭐ Highlight")
+        hl_search = st.text_input("Search model to highlight")
+        hl_opts = [n for n in sorted(df["name"].unique()) if hl_search.lower() in n.lower()]
+        hl_names = st.multiselect("Models to highlight", hl_opts, max_selections=10)
+        st.caption("Highlighted models render as large gold markers.")
 
         st.divider()
 
@@ -280,6 +314,8 @@ def main():
         hover_data["aa_tokens_per_sec"] = ":.1f"
 
     use_continuous = color_mode == "Value score"
+    hl_mask = visible["name"].isin(hl_names) if hl_names else pd.Series(False, index=visible.index)
+    base_opac = 0.18 if len(hl_names) else 0.45
     if chart_type == "3D (WebGL)":
         if use_continuous:
             fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
@@ -294,7 +330,18 @@ def main():
                                 text=None, title=None)
         if show_field and len(visible) >= 4:
             fig.add_trace(build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel))
-        fig.update_traces(marker=dict(size=sizes, opacity=0.45), selector=dict(type="scatter3d"))
+        fig.update_traces(marker=dict(size=sizes, opacity=base_opac), selector=dict(type="scatter3d"))
+        if len(hl_names):
+            hdf = visible[hl_mask]
+            fig.add_trace(go.Scatter3d(
+                x=hdf[x_axis], y=hdf[y_axis], z=hdf[z_axis],
+                mode="markers",
+                name=f"Highlighted ({len(hdf)})",
+                marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=45), color="#FFD700",
+                            opacity=1.0, line=dict(width=2, color="#000000")),
+                hovertemplate="%{customdata}<extra>Highlighted</extra>",
+                customdata=hdf["name"],
+            ))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
                           height=750, margin=dict(l=0, r=0, t=30, b=0))
         if use_continuous:
@@ -311,7 +358,18 @@ def main():
         else:
             fig = px.scatter(visible, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                              hover_name="name", hover_data=hover_data, title=None)
-        fig.update_traces(marker=dict(size=sizes, opacity=0.45))
+        fig.update_traces(marker=dict(size=sizes, opacity=base_opac))
+        if len(hl_names):
+            hdf = visible[hl_mask]
+            fig.add_trace(go.Scatter(
+                x=hdf[x_axis], y=hdf[y_axis],
+                mode="markers",
+                name=f"Highlighted ({len(hdf)})",
+                marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=45), color="#FFD700",
+                            opacity=1.0, line=dict(width=2, color="#000000")),
+                hovertemplate="%{customdata}<extra>Highlighted</extra>",
+                customdata=hdf["name"],
+            ))
         fig.update_layout(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
                           height=750, margin=dict(l=0, r=0, t=30, b=0))
         if use_continuous:
