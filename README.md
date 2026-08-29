@@ -5,6 +5,7 @@ An interactive Streamlit app that plots the best current LLMs across providers o
 ## Features
 
 - 3D scatter chart (Plotly) of models colored by provider
+- **Auto WebGL detection**: falls back to a 2D bubble chart automatically when the browser has WebGL disabled (e.g. VMs, remote desktops)
 - Swap any metric onto any axis (cost, speed, intelligence)
 - Log scale toggle for cost
 - Add and remove models and providers from the sidebar

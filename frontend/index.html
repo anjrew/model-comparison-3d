@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>WebGL check</title>
+</head>
+<body>
+  <script src="https://unpkg.com/streamlit-component-lib@2.0.0/dist/streamlit.js"></script>
+  <script>
+    const canvas = document.createElement("canvas");
+    const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+    const value = gl ? "yes" : "no";
+    Streamlit.setComponentReady();
+    Streamlit.setComponentValue(value);
+    Streamlit.setFrameHeight(0);
+  </script>
+</body>
+</html>

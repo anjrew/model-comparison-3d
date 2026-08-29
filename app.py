@@ -1,8 +1,11 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import plotly.express as px
 
 from models_data import DEFAULT_MODELS, PROVIDER_COLORS
+
+webgl_check = components.declare_component("webgl_check", path="frontend")
 
 st.set_page_config(page_title="Model Compare 3D", page_icon="📊", layout="wide")
 
@@ -54,11 +57,22 @@ def main():
         st.divider()
 
         st.subheader("📈 Chart type")
-        chart_type = st.radio(
-            "3D needs WebGL. If the chart fails to render, pick 2D.",
-            ["3D (WebGL)", "2D (fallback)"],
+        chart_mode = st.radio(
+            "3D needs WebGL. Auto picks the best option for your browser.",
+            ["Auto", "3D (WebGL)", "2D (fallback)"],
             horizontal=True,
         )
+
+        detected = webgl_check()
+        if chart_mode == "Auto":
+            if detected == "no":
+                chart_type = "2D (fallback)"
+            else:
+                chart_type = "3D (WebGL)"
+        else:
+            chart_type = chart_mode
+        if detected == "no" and chart_type == "3D (WebGL)":
+            st.warning("⚠️ WebGL is disabled in this browser — the 3D chart will not render. Use 2D (fallback).")
 
         st.divider()
 
