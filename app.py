@@ -266,8 +266,8 @@ def main():
         sizes = pd.Series([8] * len(visible), index=visible.index)
         size_label = "Uniform ball size"
 
-    hover_data = {"cost": ":.2f", "speed": True, "intelligence": True, "context": True,
-                  "reasoning": True, "params": ":.1f"}
+    hover_data = {"provider": True, "cost": ":.2f", "speed": True, "intelligence": True,
+                  "context": True, "reasoning": True, "params": ":.1f"}
     if live:
         hover_data["aa_intelligence_index"] = True
         hover_data["aa_tokens_per_sec"] = ":.1f"
