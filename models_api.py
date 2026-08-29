@@ -5,9 +5,31 @@ import time
 import urllib.request
 
 MODELS_DEV_URL = "https://models.dev/api.json"
-AA_URL = "https://artificialanalysis.ai/api/v1/models"
+AA_URL = "https://artificialanalysis.ai/api/v2/language/models/free"
 CACHE_FILE = os.path.join(os.path.expanduser("~"), ".cache", "model_compare_modelsdev.json")
+AA_CACHE_FILE = os.path.join(os.path.expanduser("~"), ".cache", "model_compare_aa.json")
+AA_KEY_FILE = os.path.join(os.path.expanduser("~"), ".config", "model-compare", "aa_key")
 CACHE_TTL = 24 * 60 * 60
+
+
+def load_aa_key():
+    try:
+        if os.path.exists(AA_KEY_FILE):
+            with open(AA_KEY_FILE) as f:
+                return f.read().strip() or None
+    except Exception:
+        pass
+    return None
+
+
+def save_aa_key(key):
+    key = (key or "").strip()
+    try:
+        os.makedirs(os.path.dirname(AA_KEY_FILE), exist_ok=True)
+        with open(AA_KEY_FILE, "w") as f:
+            f.write(key)
+    except Exception:
+        pass
 
 PALETTE = [
     "#4D6BFE", "#D97757", "#10A37F", "#F43F5E", "#F59E0B", "#7C3AED",
@@ -21,12 +43,15 @@ _FRONTIER = ("opus", "sonnet", "gpt-5", "gpt 5", "codex", "claude 4", "gemini 3"
 _FAST = ("flash", "mini", "small", "haiku", "lite", "air", "nano", "turbo", "fast")
 
 
-def _get_json(url, key=None, timeout=30):
+def _get_json(url, key=None, timeout=30, aa_key=False):
     req = urllib.request.Request(url)
     req.add_header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0 Safari/537.36")
     req.add_header("Accept", "application/json")
     if key:
-        req.add_header("Authorization", f"Bearer {key}")
+        if aa_key:
+            req.add_header("x-api-key", key)
+        else:
+            req.add_header("Authorization", f"Bearer {key}")
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
@@ -84,18 +109,100 @@ def load_catalog(force=False):
     return models
 
 
+def _norm(s):
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
+def _intel_to_10(idx):
+    return round(min(10.0, idx / 7.0), 1)
+
+
+def _speed_to_10(ts):
+    import math
+    v = (math.log10(max(ts, 0.1)) - 0.5) * 2.5 + 4
+    return round(max(1.0, min(10.0, v)), 1)
+
+
 def fetch_aa(key):
-    data = _get_json(AA_URL, key=key)
-    rows = data.get("models") or data.get("data") or []
-    out = {}
-    for r in rows:
-        mid = r.get("id") or r.get("model") or ""
-        if not mid:
-            continue
-        out[mid] = {
-            "intelligence": r.get("intelligence_index") or r.get("intelligence") or r.get("intelligence_index_percent"),
-            "speed": r.get("output_speed") or r.get("speed"),
-        }
+    if os.path.exists(AA_CACHE_FILE) and time.time() - os.path.getmtime(AA_CACHE_FILE) < CACHE_TTL:
+        try:
+            with open(AA_CACHE_FILE) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    models = {}
+    page = 1
+    while page <= 5:
+        data = _get_json(f"{AA_URL}?page={page}", key=key, aa_key=True)
+        for r in data.get("data", []):
+            evals = r.get("evaluations") or {}
+            perf = r.get("performance") or {}
+            idx = evals.get("artificial_analysis_intelligence_index")
+            ts = perf.get("median_output_tokens_per_second")
+            if idx is None or ts is None:
+                continue
+            models[(r.get("slug") or "").lower()] = {
+                "intelligence_index": idx,
+                "tokens_per_sec": ts,
+                "name": r.get("name") or "",
+            }
+        pag = data.get("pagination") or {}
+        if not pag.get("has_more"):
+            break
+        page += 1
+    try:
+        with open(AA_CACHE_FILE, "w") as f:
+            json.dump(models, f)
+    except Exception:
+        pass
+    return models
+
+
+def _match_aa(model, aa):
+    target = _norm(model["id"].rsplit("/", 1)[-1]) or _norm(model.get("name") or "")
+    if not target:
+        return None
+    best_v, best_score = None, -1
+    for slug, v in aa.items():
+        sn = _norm(slug)
+        nn = _norm(v.get("name") or "")
+        if sn and sn == target:
+            return v
+        if nn and nn == target:
+            return v
+        if len(sn) >= 5 and (sn in target or target in sn) and len(sn) > best_score:
+            best_score = len(sn)
+            best_v = v
+    return best_v
+
+
+def apply_scores(models, aa=None):
+    out = []
+    for m in models:
+        row = dict(m)
+        live = False
+        intelligence = row.get("intelligence")
+        speed = row.get("speed")
+        if aa:
+            hit = _match_aa(m, aa)
+            if hit:
+                intelligence = _intel_to_10(hit["intelligence_index"])
+                speed = _speed_to_10(hit["tokens_per_sec"])
+                row["aa_intelligence_index"] = hit["intelligence_index"]
+                row["aa_tokens_per_sec"] = hit["tokens_per_sec"]
+                live = True
+        if intelligence is None:
+            intelligence = estimate_intelligence(m)
+            speed = estimate_speed(m)
+        row["intelligence"] = intelligence
+        row["speed"] = speed
+        row["scores_live"] = live
+        if row.get("params") is None:
+            row["params"] = guess_params(intelligence)
+            row["params_est"] = True
+        else:
+            row["params_est"] = False
+        out.append(row)
     return out
 
 
@@ -125,23 +232,8 @@ def estimate_speed(m):
     return round(s, 1)
 
 
-def apply_scores(models, aa=None):
-    out = []
-    for m in models:
-        row = dict(m)
-        if aa:
-            hit = aa.get(m["id"]) or aa.get(m["id"].split("/", 1)[-1])
-            if hit and hit.get("intelligence") is not None and hit.get("speed") is not None:
-                row["intelligence"] = round(float(hit["intelligence"]), 1)
-                row["speed"] = round(float(hit["speed"]), 1)
-                row["scores_live"] = True
-                out.append(row)
-                continue
-        row["intelligence"] = estimate_intelligence(m)
-        row["speed"] = estimate_speed(m)
-        row["scores_live"] = False
-        out.append(row)
-    return out
+def guess_params(intelligence):
+    return round(10 ** ((intelligence - 5.0) * 0.55 + 0.4), 1)
 
 
 def provider_color(provider, index=0):

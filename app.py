@@ -22,7 +22,7 @@ def get_catalog(force=False):
     return api.load_catalog(force=force)
 
 
-@st.cache_data(ttl=1800, show_spinner="Fetching Artificial Analysis scores…")
+@st.cache_data(ttl=86400, show_spinner="Fetching Artificial Analysis scores…")
 def get_aa(key):
     try:
         return api.fetch_aa(key)
@@ -35,9 +35,27 @@ def main():
 
     if "custom_models" not in st.session_state:
         st.session_state.custom_models = []
+    if "aa_key_input" not in st.session_state:
+        st.session_state.aa_key_input = api.load_aa_key() or ""
+
+    def _aa_key_cb():
+        key = st.session_state.aa_key_input.strip()
+        api.save_aa_key(key)
 
     catalog = get_catalog()
-    aa_key = st.sidebar.text_input("Artificial Analysis API key (for live speed & intelligence)", type="password")
+    st.sidebar.text_input(
+        "Artificial Analysis API key (free tier works)",
+        type="password",
+        key="aa_key_input",
+        on_change=_aa_key_cb,
+        help="Saved to ~/.config/model-compare/aa_key and auto-loaded next launch.",
+    )
+    if st.sidebar.button("Clear saved key"):
+        st.session_state.aa_key_input = ""
+        api.save_aa_key("")
+        st.rerun()
+
+    aa_key = st.session_state.aa_key_input.strip() or None
     aa = get_aa(aa_key) if aa_key else None
 
     models = catalog + st.session_state.custom_models
@@ -173,6 +191,9 @@ def main():
 
     hover_data = {"cost": ":.2f", "speed": True, "intelligence": True, "context": True,
                   "reasoning": True, "params": ":.1f"}
+    if live:
+        hover_data["aa_intelligence_index"] = True
+        hover_data["aa_tokens_per_sec"] = ":.1f"
     if chart_type == "3D (WebGL)":
         fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
                             color="provider", color_discrete_map=color_map,
