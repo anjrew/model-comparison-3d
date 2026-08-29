@@ -186,16 +186,15 @@ def main():
                 diff = _TOTAL_W - (v + sum(st.session_state[o] for o in others))
                 biggest = max(others, key=lambda o: st.session_state[o])
                 st.session_state[biggest] = max(0, st.session_state[biggest] + diff)
-            st.rerun()
 
-        st.slider("Cheapness (cost) weight", 0, _TOTAL_W, key="w_cost",
+        st.slider("Cheapness (cost) weight (%)", 0, _TOTAL_W, key="w_cost",
                   on_change=_w_cb, kwargs={"kc": "w_cost"})
-        st.slider("Speed weight", 0, _TOTAL_W, key="w_speed",
+        st.slider("Speed weight (%)", 0, _TOTAL_W, key="w_speed",
                   on_change=_w_cb, kwargs={"kc": "w_speed"})
-        st.slider("Intelligence weight", 0, _TOTAL_W, key="w_intel",
+        st.slider("Intelligence weight (%)", 0, _TOTAL_W, key="w_intel",
                   on_change=_w_cb, kwargs={"kc": "w_intel"})
-        st.caption(f"Total: {st.session_state.w_cost + st.session_state.w_speed + st.session_state.w_intel} / 100")
         w_cost, w_speed, w_intel = st.session_state.w_cost, st.session_state.w_speed, st.session_state.w_intel
+        st.caption(f"{w_cost}% + {w_speed}% + {w_intel}% = {w_cost + w_speed + w_intel}% (= {(w_cost + w_speed + w_intel) / 100:.2f})")
 
         st.divider()
 
