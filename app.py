@@ -53,6 +53,15 @@ def main():
 
         st.divider()
 
+        st.subheader("📈 Chart type")
+        chart_type = st.radio(
+            "3D needs WebGL. If the chart fails to render, pick 2D.",
+            ["3D (WebGL)", "2D (fallback)"],
+            horizontal=True,
+        )
+
+        st.divider()
+
         st.subheader("➕ Add model")
         with st.form("add_model", clear_on_submit=True):
             name = st.text_input("Model name")
@@ -87,32 +96,62 @@ def main():
         st.warning("No models to show. Enable a provider or add a model.")
         return
 
-    fig = px.scatter_3d(
-        visible,
-        x=x_axis,
-        y=y_axis,
-        z=z_axis,
-        color="provider",
-        color_discrete_map=PROVIDER_COLORS,
-        hover_name="name",
-        hover_data={"cost": ":.2f", "speed": True, "intelligence": True},
-        text="name",
-        title=None,
-    )
+    if chart_type == "3D (WebGL)":
+        fig = px.scatter_3d(
+            visible,
+            x=x_axis,
+            y=y_axis,
+            z=z_axis,
+            color="provider",
+            color_discrete_map=PROVIDER_COLORS,
+            hover_name="name",
+            hover_data={"cost": ":.2f", "speed": True, "intelligence": True},
+            text="name",
+            title=None,
+        )
 
-    fig.update_traces(marker=dict(size=8), textposition="top center")
-    fig.update_layout(
-        scene=dict(
+        fig.update_traces(marker=dict(size=8), textposition="top center")
+        fig.update_layout(
+            scene=dict(
+                xaxis_title=axis_labels[x_axis],
+                yaxis_title=axis_labels[y_axis],
+                zaxis_title=axis_labels[z_axis],
+            ),
+            legend_title="Provider",
+            height=750,
+            margin=dict(l=0, r=0, t=30, b=0),
+        )
+        if log_x and x_axis == "cost":
+            fig.update_layout(scene=dict(xaxis=dict(type="log")))
+    else:
+        fig = px.scatter(
+            visible,
+            x=x_axis,
+            y=y_axis,
+            color="provider",
+            color_discrete_map=PROVIDER_COLORS,
+            hover_name="name",
+            hover_data={"cost": ":.2f", "speed": True, "intelligence": True},
+            text="name",
+            title=None,
+            height=750,
+        )
+        fig.update_traces(textposition="top center")
+        fig.update_layout(
             xaxis_title=axis_labels[x_axis],
             yaxis_title=axis_labels[y_axis],
-            zaxis_title=axis_labels[z_axis],
-        ),
-        legend_title="Provider",
-        height=750,
-        margin=dict(l=0, r=0, t=30, b=0),
-    )
-    if log_x and x_axis == "cost":
-        fig.update_layout(scene=dict(xaxis=dict(type="log")))
+            legend_title="Provider",
+            height=750,
+            margin=dict(l=0, r=0, t=30, b=0),
+        )
+        fig.add_annotation(
+            text=f"{axis_labels[z_axis]} shown by bubble size",
+            xref="paper", yref="paper", x=0, y=1.08, showarrow=False,
+            font=dict(size=12), xanchor="left",
+        )
+        fig.update_traces(marker=dict(size=[m[z_axis] * 14 for _, m in visible.iterrows()]))
+        if log_x and x_axis == "cost":
+            fig.update_xaxes(type="log")
 
     st.plotly_chart(fig, width="stretch")
 
