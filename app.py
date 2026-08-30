@@ -1,4 +1,6 @@
+import json
 import math
+import os
 
 import numpy as np
 import streamlit as st
@@ -8,6 +10,36 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 import models_api as api
+
+STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_state.json")
+
+STATE_KEYS = [
+    "chart_mode", "ball_size", "color_mode", "show_field", "log_x",
+    "x_axis", "y_axis", "z_axis",
+    "w_cost", "w_speed", "w_intel",
+    "search", "show_all", "prov_search", "sel_providers",
+    "reasoning_only", "open_weights", "min_context", "max_context",
+    "hl_search", "hl_names", "table_search",
+]
+
+
+def _load_state():
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_state():
+    data = {k: st.session_state[k] for k in STATE_KEYS if k in st.session_state}
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 webgl_check = components.declare_component("webgl_check", path="frontend")
 
@@ -162,6 +194,10 @@ def main():
         st.session_state.custom_models = []
     if "aa_key_input" not in st.session_state:
         st.session_state.aa_key_input = api.load_aa_key() or ""
+    if "state_seeded" not in st.session_state:
+        for _k, _v in _load_state().items():
+            st.session_state[_k] = _v
+        st.session_state.state_seeded = True
 
     def _aa_key_cb():
         key = st.session_state.aa_key_input.strip()
@@ -201,6 +237,7 @@ def main():
             "3D needs WebGL. Auto picks the best option.",
             ["Auto", "3D (WebGL)", "2D (fallback)"],
             horizontal=True,
+            key="chart_mode",
         )
         detected = webgl_check()
         st.caption(f"WebGL status: {'detecting…' if detected is None else detected}")
@@ -214,13 +251,13 @@ def main():
         st.divider()
 
         st.subheader("🎚️ Axes")
-        x_axis = st.selectbox("X axis", list(AXES), index=0)
-        y_axis = st.selectbox("Y axis", list(AXES), index=1)
-        z_axis = st.selectbox("Z axis", list(AXES), index=2)
-        log_x = st.checkbox("Log scale for cost", value=True)
-        ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True)
-        color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1)
-        show_field = st.checkbox("Show value field (3D gradient)", value=True)
+        x_axis = st.selectbox("X axis", list(AXES), index=0, key="x_axis")
+        y_axis = st.selectbox("Y axis", list(AXES), index=1, key="y_axis")
+        z_axis = st.selectbox("Z axis", list(AXES), index=2, key="z_axis")
+        log_x = st.checkbox("Log scale for cost", value=True, key="log_x")
+        ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
+        color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
+        show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
 
         st.caption("⚖️ Value weights — tilt the gradient toward what matters")
         w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
@@ -241,36 +278,36 @@ def main():
         st.divider()
 
         st.subheader("🔎 Filter")
-        search = st.text_input("Search model name")
+        search = st.text_input("Search model name", key="search")
         providers = sorted(df["provider"].unique())
 
-        show_all = st.checkbox("Show all providers", value=True)
+        show_all = st.checkbox("Show all providers", value=True, key="show_all")
         sel_providers = []
         if not show_all:
             with st.expander(f"Choose providers ({len(providers):,})"):
-                prov_search = st.text_input("Search providers")
+                prov_search = st.text_input("Search providers", key="prov_search")
                 opts = [p for p in providers if prov_search.lower() in p.lower()]
-                sel_providers = st.multiselect("Providers to show (empty = all)", opts)
+                sel_providers = st.multiselect("Providers to show (empty = all)", opts, key="sel_providers")
                 st.caption(f"Found {len(opts):,} matching providers.")
 
         with st.expander(f"Browse all {len(providers):,} providers"):
             counts = df.groupby("provider").size().sort_values(ascending=False).rename("models")
             st.dataframe(counts, width="stretch")
 
-        reasoning_only = st.checkbox("Reasoning models only", value=False)
-        open_weights = st.checkbox("Open-weights only", value=False)
+        reasoning_only = st.checkbox("Reasoning models only", value=False, key="reasoning_only")
+        open_weights = st.checkbox("Open-weights only", value=False, key="open_weights")
         ctx_c1, ctx_c2 = st.columns(2)
         with ctx_c1:
-            min_context = st.number_input("Min context (K tokens)", min_value=0, step=16, value=0)
+            min_context = st.number_input("Min context (K tokens)", min_value=0, step=16, value=0, key="min_context")
         with ctx_c2:
-            max_context = st.number_input("Max context (K tokens)", min_value=0, step=16, value=0)
+            max_context = st.number_input("Max context (K tokens)", min_value=0, step=16, value=0, key="max_context")
 
         st.divider()
 
         st.subheader("⭐ Highlight")
-        hl_search = st.text_input("Search model to highlight")
+        hl_search = st.text_input("Search model to highlight", key="hl_search")
         hl_opts = [n for n in sorted(df["name"].unique()) if hl_search.lower() in n.lower()]
-        hl_names = st.multiselect("Models to highlight", hl_opts, max_selections=10)
+        hl_names = st.multiselect("Models to highlight", hl_opts, max_selections=10, key="hl_names")
         st.caption("Highlighted models render as large gold markers.")
 
         st.divider()
@@ -447,13 +484,15 @@ def main():
     st.plotly_chart(fig, width="stretch")
 
     st.subheader("Table")
-    table_search = st.text_input("Search table (matches any column)")
+    table_search = st.text_input("Search table (matches any column)", key="table_search")
     tbl = visible
     if table_search:
         mask = tbl.astype(str).apply(lambda col: col.str.contains(table_search, case=False, na=False)).any(axis=1)
         tbl = tbl[mask]
     st.dataframe(tbl, width="stretch", hide_index=True)
     st.caption(f"Showing {len(tbl):,} of {len(visible):,} filtered models.")
+
+    _save_state()
 
 
 if __name__ == "__main__":
