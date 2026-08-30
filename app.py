@@ -106,6 +106,8 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
         surface_count=18,
         colorscale=VALUE_SCALE,
         showscale=False,
+        showlegend=False,
+        hoverinfo="skip",
         caps=dict(x_show=False, y_show=False, z_show=False),
     )
 
