@@ -182,10 +182,15 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
                 vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel)
 
+    cmin = float(np.percentile(vv, 2))
+    cmax = float(np.percentile(vv, 98))
+    if cmax <= cmin:
+        cmin, cmax = float(vv.min()), float(vv.max())
+
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
         value=vv.ravel(),
-        cmin=float(vv.min()), cmax=float(vv.max()),
+        cmin=cmin, cmax=cmax,
         isomin=float(vv.min()), isomax=float(vv.max()),
         opacity=0.16,
         surface_count=22,
@@ -394,7 +399,8 @@ def main():
     s_norm = (visible["speed"] - s_lo) / (s_hi - s_lo)
     i_norm = (visible["intelligence"] - i_lo) / (i_hi - i_lo)
     visible["value"] = (w_cost * cheap + w_speed * s_norm + w_intel * i_norm) / wsum
-    value_range = (float(visible["value"].min()), float(visible["value"].max()))
+    vp = visible["value"].to_numpy(dtype=float)
+    value_range = (float(np.percentile(vp, 2)), float(np.percentile(vp, 98)))
 
     if ball_size == "Parameters":
         pvals = visible["params"].dropna()
