@@ -82,6 +82,56 @@ def parse_params(name, mid):
     return max(vals) if vals else None
 
 
+_FAMILY_COUNTRY = {
+    "gpt": "US", "gpt-mini": "US", "gpt-nano": "US", "gpt-pro": "US", "gpt-codex": "US",
+    "gpt-oss": "US", "gpt-image": "US", "gpt-sol": "US", "gpt-luna": "US", "gpt-terra": "US",
+    "o": "US", "o-mini": "US",
+    "claude-opus": "US", "claude-sonnet": "US", "claude-haiku": "US", "claude-fable": "US",
+    "gemini": "US", "gemini-flash": "US", "gemini-pro": "US", "gemini-flash-lite": "US",
+    "gemma": "US", "veo": "US", "imagen": "US",
+    "llama": "US", "grok": "US", "grok-build": "US", "nemotron": "US",
+    "phi": "US", "sonar": "US", "muse": "US", "laguna": "US", "auto": "US",
+    "qwen": "CN", "qwen3.5": "CN", "qwen3.6": "CN",
+    "glm": "CN", "glm-flash": "CN", "glm-air": "CN",
+    "kimi-k2": "CN", "kimi-k3": "CN", "kimi-thinking": "CN",
+    "minimax": "CN", "ernie": "CN", "seed": "CN", "mimo": "CN", "ling": "CN",
+    "deepseek": "CN", "deepseek-thinking": "CN", "deepseek-flash": "CN",
+    "mistral-small": "FR", "mistral-medium": "FR", "mistral-large": "FR",
+    "mistral": "FR", "ministral": "FR", "mistral-nemo": "FR", "devstral": "FR",
+    "command-r": "CA", "command-a": "CA",
+    "flux": "DE",
+    "jamba": "IL",
+}
+
+_NAME_COUNTRY_KEYWORDS = [
+    ("claude", "US"), ("gpt", "US"), ("openai", "US"), ("gemini", "US"), ("gemma", "US"),
+    ("llama", "US"), ("grok", "US"), ("nemotron", "US"), ("phi-", "US"), ("sonar", "US"),
+    ("deepseek", "CN"), ("qwen", "CN"), ("glm", "CN"), ("kimi", "CN"), ("minimax", "CN"),
+    ("ernie", "CN"), ("doubao", "CN"), ("seed", "CN"), ("mimo", "CN"), ("baichuan", "CN"),
+    ("mistral", "FR"), ("ministral", "FR"), ("codestral", "FR"), ("devstral", "FR"),
+    ("command", "CA"), ("cohere", "CA"),
+    ("flux", "DE"),
+    ("jamba", "IL"), ("falcon", "AE"),
+    ("exaone", "KR"), ("hyperclova", "KR"),
+]
+
+_CONTINENT = {
+    "US": "North America", "CA": "North America",
+    "CN": "Asia", "IL": "Asia", "AE": "Asia", "KR": "Asia", "JP": "Asia", "IN": "Asia",
+    "FR": "Europe", "DE": "Europe", "GB": "Europe", "NL": "Europe", "SE": "Europe",
+}
+
+
+def infer_country(name, family):
+    if family in _FAMILY_COUNTRY:
+        return _FAMILY_COUNTRY[family]
+    nm = (name or "").lower()
+    for kw, cc in _NAME_COUNTRY_KEYWORDS:
+        if kw in nm:
+            return cc
+    return None
+
+
 def load_catalog(force=False):
     data = fetch_models_dev(force=force)
     models = []
@@ -93,14 +143,18 @@ def load_catalog(force=False):
             if inp is None:
                 continue
             ctx = (m.get("limit") or {}).get("context")
+            name = m.get("name") or mid
+            country = infer_country(name, m.get("family"))
             models.append({
                 "id": f"{prov_id}/{mid}",
-                "name": m.get("name") or mid,
+                "name": name,
                 "provider": provider,
                 "cost": inp,
                 "cost_out": cost.get("output"),
                 "context": ctx or 0,
-                "params": parse_params(m.get("name") or mid, mid),
+                "params": parse_params(name, mid),
+                "country": country,
+                "continent": _CONTINENT.get(country, "Other") if country else "Other",
                 "reasoning": bool(m.get("reasoning")),
                 "open_weights": bool(m.get("open_weights")),
                 "release_date": m.get("release_date"),

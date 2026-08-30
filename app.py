@@ -20,6 +20,7 @@ STATE_KEYS = [
     "w_cost", "w_speed", "w_intel",
     "search", "show_all", "prov_search", "sel_providers",
     "reasoning_only", "open_weights", "min_context", "max_context",
+    "sel_continents", "sel_countries",
     "hl_search", "hl_names", "table_search",
 ]
 
@@ -345,6 +346,12 @@ def main():
             with ctx_c2:
                 max_context = st.number_input("Max", min_value=0, step=16, value=0, key="max_context")
 
+            st.caption("Origin")
+            continent_opts = sorted(df["continent"].unique())
+            country_opts = sorted([c for c in df["country"].dropna().unique()])
+            sel_continents = st.multiselect("Continent", continent_opts, key="sel_continents")
+            sel_countries = st.multiselect("Country", country_opts, key="sel_countries")
+
             with st.expander(f"Browse all {len(providers):,} providers"):
                 counts = df.groupby("provider").size().sort_values(ascending=False).rename("models")
                 st.dataframe(counts, width="stretch")
@@ -394,6 +401,10 @@ def main():
         visible = visible[visible["context"] >= min_context * 1000]
     if max_context:
         visible = visible[visible["context"] <= max_context * 1000]
+    if sel_continents:
+        visible = visible[visible["continent"].isin(sel_continents)]
+    if sel_countries:
+        visible = visible[visible["country"].isin(sel_countries)]
     visible = visible.sort_values("intelligence", ascending=False).reset_index(drop=True)
 
     if visible.empty:
@@ -437,7 +448,7 @@ def main():
         size_label = "Uniform ball size"
 
     hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)",
-                  "Context", "Params (B)", "Reasoning", "AA Intell. Index", "AA tokens/s"]
+                  "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s"]
 
     def _hnum(v, fmt="{:.1f}"):
         return "n/a" if v is None or (isinstance(v, float) and v != v) else fmt.format(v)
@@ -449,6 +460,7 @@ def main():
     hdata["Intelligence (1-10)"] = hdata["intelligence"].map(lambda v: _hnum(v, "{:.1f}"))
     hdata["Context"] = hdata["context"].map(lambda v: _hnum(v, "{:,.0f}"))
     hdata["Params (B)"] = hdata["params"].map(lambda v: _hnum(v, "{:.1f}"))
+    hdata["Country"] = hdata["country"].fillna("n/a")
     hdata["Reasoning"] = hdata["reasoning"].map(lambda v: "Yes" if v else "No")
     hdata["AA Intell. Index"] = hdata["aa_intelligence_index"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_intelligence_index" in hdata.columns else "n/a"
     hdata["AA tokens/s"] = hdata["aa_tokens_per_sec"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_tokens_per_sec" in hdata.columns else "n/a"
