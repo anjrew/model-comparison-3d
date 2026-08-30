@@ -73,37 +73,39 @@ def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel):
     return (w_cost * cheap + w_speed * sn + w_intel * inn) / wsum
 
 
+def _metric_axis_range(visible, metric):
+    lo = st.session_state.get(f"rng_{metric}_min")
+    hi = st.session_state.get(f"rng_{metric}_max")
+    if metric == "context":
+        dlo, dhi = float(visible["context"].min()), float(visible["context"].max())
+        lo = float(lo) * 1000 if lo is not None else dlo
+        hi = float(hi) * 1000 if hi is not None else dhi
+        if hi <= lo:
+            hi = lo + 1
+        return lo, hi
+    if metric == "cost":
+        dlo, dhi = float(visible["cost"].min()), float(visible["cost"].max())
+        lo = max(lo if lo is not None else dlo, 1e-6)
+        hi = max(hi if hi is not None else dhi, lo)
+        return lo, hi
+    dlo, dhi = float(visible[metric].min()), float(visible[metric].max())
+    lo = float(lo) if lo is not None else dlo
+    hi = float(hi) if hi is not None else dhi
+    if hi <= lo:
+        hi = lo + 1e-6
+    return lo, hi
+
+
 def _compute_bounds(visible):
-    def rng(m):
-        return st.session_state.get(f"rng_{m}_min"), st.session_state.get(f"rng_{m}_max")
-
-    c_lo, c_hi = rng("cost")
-    s_lo, s_hi = rng("speed")
-    i_lo, i_hi = rng("intelligence")
-
-    cdlo, cdhi = float(visible["cost"].min()), float(visible["cost"].max())
-    c_lo = max(c_lo if c_lo is not None else cdlo, 1e-6)
-    c_hi = max(c_hi if c_hi is not None else cdhi, c_lo)
-
-    sdlo, sdhi = float(visible["speed"].min()), float(visible["speed"].max())
-    s_lo = float(s_lo) if s_lo is not None else sdlo
-    s_hi = float(s_hi) if s_hi is not None else sdhi
-    if s_hi <= s_lo:
-        s_hi = s_lo + 1e-6
-
-    idlo, idhi = float(visible["intelligence"].min()), float(visible["intelligence"].max())
-    i_lo = float(i_lo) if i_lo is not None else idlo
-    i_hi = float(i_hi) if i_hi is not None else idhi
-    if i_hi <= i_lo:
-        i_hi = i_lo + 1e-6
-
+    c_lo, c_hi = _metric_axis_range(visible, "cost")
+    s_lo, s_hi = _metric_axis_range(visible, "speed")
+    i_lo, i_hi = _metric_axis_range(visible, "intelligence")
     return (math.log10(c_lo), math.log10(c_hi), s_lo, s_hi, i_lo, i_hi)
 
 
-def _axis_ticks(vals, log=False, steps=6):
-    lo, hi = float(vals.min()), float(vals.max())
+def _axis_ticks(lo, hi, log=False, steps=6):
     if hi <= lo:
-        lo, hi = lo - 1, hi + 1
+        hi = lo + (abs(lo) or 1) * 0.01 + 1e-9
     if log:
         lo, hi = max(lo, 1e-6), max(hi, 1e-6)
         return np.logspace(np.log10(lo), np.log10(hi), steps)
@@ -118,16 +120,13 @@ def _axis_format(axis):
     return {"cost": "%.6f", "speed": "%.6f", "intelligence": "%.6f", "context": "%.0f"}.get(axis, "%.6f")
 
 
-def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x):
+def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
     for dim, ax in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
-        lo = st.session_state.get(f"rng_{ax}_min")
-        hi = st.session_state.get(f"rng_{ax}_max")
-        if lo is None and hi is None:
-            continue
+        lo, hi = _metric_axis_range(visible, ax)
         is_log = ax == "cost" and log_x
-        lv = math.log10(lo) if (is_log and lo is not None) else lo
-        hv = math.log10(hi) if (is_log and hi is not None) else hi
-        rng = [lv if lo is not None else None, hv if hi is not None else None]
+        lv = math.log10(lo) if is_log else lo
+        hv = math.log10(hi) if is_log else hi
+        rng = [lv, hv]
         if chart_type == "3D (WebGL)":
             fig.update_layout(scene={f"{dim}axis": dict(range=rng)})
         elif dim != "z":
@@ -136,10 +135,13 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x):
 
 def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb, steps=10):
     med = visible[["cost", "intelligence", "speed"]].median()
+    xr = _metric_axis_range(visible, x_axis)
+    yr = _metric_axis_range(visible, y_axis)
+    zr = _metric_axis_range(visible, z_axis)
     ticks = {
-        x_axis: _axis_ticks(visible[x_axis], log=log_x and x_axis == "cost", steps=steps),
-        y_axis: _axis_ticks(visible[y_axis], log=False, steps=steps),
-        z_axis: _axis_ticks(visible[z_axis], log=False, steps=steps),
+        x_axis: _axis_ticks(xr[0], xr[1], log=log_x and x_axis == "cost", steps=steps),
+        y_axis: _axis_ticks(yr[0], yr[1], log=False, steps=steps),
+        z_axis: _axis_ticks(zr[0], zr[1], log=False, steps=steps),
     }
     grids = {
         "cost": ticks.get("cost", np.full(steps, med["cost"])),
@@ -479,7 +481,7 @@ def main():
         if log_x and x_axis == "cost":
             fig.update_xaxes(type="log")
 
-    _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x)
+    _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible)
 
     st.plotly_chart(fig, width="stretch")
 
