@@ -29,11 +29,43 @@ VALUE_SCALE = [
 ]
 
 
-def _score(cost_v, intel_v, speed_v, clow_log, chi_log, w_cost, w_speed, w_intel):
-    cspan = (chi_log - clow_log) or 1
-    cheap = 1 - min(1, max(0, (math.log10(max(cost_v, 1e-6)) - clow_log) / cspan))
+def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel):
+    c_lo, c_hi, s_lo, s_hi, i_lo, i_hi = cb
+    cspan = (c_hi - c_lo) or 1
+    cheap = 1 - min(1, max(0, (math.log10(max(cost_v, 1e-6)) - c_lo) / cspan))
+    sspan = (s_hi - s_lo) or 1
+    sn = min(1, max(0, (speed_v - s_lo) / sspan))
+    ispan = (i_hi - i_lo) or 1
+    inn = min(1, max(0, (intel_v - i_lo) / ispan))
     wsum = max(w_cost + w_speed + w_intel, 1e-9)
-    return (w_cost * cheap + w_speed * (speed_v - 1) / 9 + w_intel * (intel_v - 1) / 9) / wsum
+    return (w_cost * cheap + w_speed * sn + w_intel * inn) / wsum
+
+
+def _compute_bounds(visible):
+    def rng(m):
+        return st.session_state.get(f"rng_{m}_min"), st.session_state.get(f"rng_{m}_max")
+
+    c_lo, c_hi = rng("cost")
+    s_lo, s_hi = rng("speed")
+    i_lo, i_hi = rng("intelligence")
+
+    cdlo, cdhi = float(visible["cost"].min()), float(visible["cost"].max())
+    c_lo = max(c_lo if c_lo is not None else cdlo, 1e-6)
+    c_hi = max(c_hi if c_hi is not None else cdhi, c_lo)
+
+    sdlo, sdhi = float(visible["speed"].min()), float(visible["speed"].max())
+    s_lo = float(s_lo) if s_lo is not None else sdlo
+    s_hi = float(s_hi) if s_hi is not None else sdhi
+    if s_hi <= s_lo:
+        s_hi = s_lo + 1e-6
+
+    idlo, idhi = float(visible["intelligence"].min()), float(visible["intelligence"].max())
+    i_lo = float(i_lo) if i_lo is not None else idlo
+    i_hi = float(i_hi) if i_hi is not None else idhi
+    if i_hi <= i_lo:
+        i_hi = i_lo + 1e-6
+
+    return (math.log10(c_lo), math.log10(c_hi), s_lo, s_hi, i_lo, i_hi)
 
 
 def _axis_ticks(vals, log=False, steps=6):
@@ -70,7 +102,7 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x):
             getattr(fig, f"update_{dim}axes")(range=rng)
 
 
-def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, steps=10):
+def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb, steps=10):
     med = visible[["cost", "intelligence", "speed"]].median()
     ticks = {
         x_axis: _axis_ticks(visible[x_axis], log=log_x and x_axis == "cost", steps=steps),
@@ -85,8 +117,6 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
     slot_for = {x_axis: 0, y_axis: 1, z_axis: 2}
 
     xx, yy, zz = np.meshgrid(ticks[x_axis], ticks[y_axis], ticks[z_axis], indexing="ij")
-    clow_log = math.log10(max(float(visible["cost"].min()), 1e-6))
-    chi_log = math.log10(max(float(visible["cost"].max()), 1e-6))
     vv = np.empty_like(xx, dtype=float)
     for i in range(steps):
         for j in range(steps):
@@ -95,7 +125,7 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
                 c = grids["cost"][idxs[slot_for.get("cost", 0)]]
                 a = grids["intelligence"][idxs[slot_for.get("intelligence", 0)]]
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
-                vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, clow_log, chi_log, w_cost, w_speed, w_intel)))
+                vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, cb, w_cost, w_speed, w_intel)))
 
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
@@ -318,13 +348,15 @@ def main():
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
 
-    clow, chigh = float(visible["cost"].min()), float(visible["cost"].max())
-    lo, hi = math.log10(max(clow, 1e-6)), math.log10(max(chigh, 1e-6))
-    span = (hi - lo) or 1
-    cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - lo) / span)))
+    cb = _compute_bounds(visible)
+    c_lo_log, c_hi_log, s_lo, s_hi, i_lo, i_hi = cb
+    cspan = (c_hi_log - c_lo_log) or 1
+    cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - c_lo_log) / cspan)))
     visible = visible.copy()
     wsum = max(w_cost + w_speed + w_intel, 1)
-    visible["value"] = (w_cost * cheap + w_speed * (visible["speed"] - 1) / 9 + w_intel * (visible["intelligence"] - 1) / 9) / wsum
+    s_norm = ((visible["speed"] - s_lo) / (s_hi - s_lo)).clip(0, 1)
+    i_norm = ((visible["intelligence"] - i_lo) / (i_hi - i_lo)).clip(0, 1)
+    visible["value"] = (w_cost * cheap + w_speed * s_norm + w_intel * i_norm) / wsum
     visible["value"] = visible["value"].clip(0, 1)
 
     if ball_size == "Parameters":
@@ -381,7 +413,7 @@ def main():
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         if show_field and len(visible) >= 4:
-            fig.add_trace(build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel))
+            fig.add_trace(build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb))
         fig.update_traces(marker=dict(size=sizes, opacity=base_opac), selector=dict(type="scatter3d"))
         if len(hl_names):
             hdf = visible[hl_mask]
