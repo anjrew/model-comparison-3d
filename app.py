@@ -223,34 +223,11 @@ def main():
         show_field = st.checkbox("Show value field (3D gradient)", value=True)
 
         st.caption("⚖️ Value weights — tilt the gradient toward what matters")
-        _TOTAL_W = 100
-        for _k, _d in (("w_cost", 33), ("w_speed", 33), ("w_intel", 34)):
-            if _k not in st.session_state:
-                st.session_state[_k] = _d
-
-        def _w_cb(kc):
-            others = [k for k in ("w_cost", "w_speed", "w_intel") if k != kc]
-            v = max(0, min(100, int(st.session_state[kc])))
-            remaining = _TOTAL_W - v
-            other_old = sum(st.session_state[o] for o in others)
-            if other_old <= 0:
-                for i, o in enumerate(others):
-                    st.session_state[o] = remaining // len(others) + (1 if i < remaining % len(others) else 0)
-            else:
-                for o in others:
-                    st.session_state[o] = round(st.session_state[o] / other_old * remaining)
-                diff = _TOTAL_W - (v + sum(st.session_state[o] for o in others))
-                biggest = max(others, key=lambda o: st.session_state[o])
-                st.session_state[biggest] = max(0, st.session_state[biggest] + diff)
-
-        st.slider("Cheapness (cost) weight (%)", 0, _TOTAL_W, key="w_cost",
-                  on_change=_w_cb, kwargs={"kc": "w_cost"})
-        st.slider("Speed weight (%)", 0, _TOTAL_W, key="w_speed",
-                  on_change=_w_cb, kwargs={"kc": "w_speed"})
-        st.slider("Intelligence weight (%)", 0, _TOTAL_W, key="w_intel",
-                  on_change=_w_cb, kwargs={"kc": "w_intel"})
-        w_cost, w_speed, w_intel = st.session_state.w_cost, st.session_state.w_speed, st.session_state.w_intel
-        st.caption(f"{w_cost}% + {w_speed}% + {w_intel}% = {w_cost + w_speed + w_intel}% (= {(w_cost + w_speed + w_intel) / 100:.2f})")
+        w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
+        w_speed = st.slider("Speed weight", 0, 100, 33, key="w_speed")
+        w_intel = st.slider("Intelligence weight", 0, 100, 34, key="w_intel")
+        wsum = max(w_cost + w_speed + w_intel, 1)
+        st.caption(f"Normalized: {round(100 * w_cost / wsum)}% / {round(100 * w_speed / wsum)}% / {round(100 * w_intel / wsum)}%")
 
         with st.expander("Axis ranges (override)"):
             st.caption("Leave blank to auto-scale.")
