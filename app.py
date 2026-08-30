@@ -64,11 +64,11 @@ VALUE_SCALE = [
 def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel):
     c_lo, c_hi, s_lo, s_hi, i_lo, i_hi = cb
     cspan = (c_hi - c_lo) or 1
-    cheap = 1 - min(1, max(0, (math.log10(max(cost_v, 1e-6)) - c_lo) / cspan))
+    cheap = 1 - (math.log10(max(cost_v, 1e-6)) - c_lo) / cspan
     sspan = (s_hi - s_lo) or 1
-    sn = min(1, max(0, (speed_v - s_lo) / sspan))
+    sn = (speed_v - s_lo) / sspan
     ispan = (i_hi - i_lo) or 1
-    inn = min(1, max(0, (intel_v - i_lo) / ispan))
+    inn = (intel_v - i_lo) / ispan
     wsum = max(w_cost + w_speed + w_intel, 1e-9)
     return (w_cost * cheap + w_speed * sn + w_intel * inn) / wsum
 
@@ -97,9 +97,18 @@ def _metric_axis_range(visible, metric):
 
 
 def _compute_bounds(visible):
-    c_lo, c_hi = _metric_axis_range(visible, "cost")
-    s_lo, s_hi = _metric_axis_range(visible, "speed")
-    i_lo, i_hi = _metric_axis_range(visible, "intelligence")
+    def r(m, dlo, dhi):
+        lo = st.session_state.get(f"rng_{m}_min")
+        hi = st.session_state.get(f"rng_{m}_max")
+        lo = float(lo) if lo is not None else dlo
+        hi = float(hi) if hi is not None else dhi
+        if hi <= lo:
+            hi = lo + 1e-6
+        return lo, hi
+
+    c_lo, c_hi = r("cost", 0.001, 100.0)
+    s_lo, s_hi = r("speed", 1.0, 10.0)
+    i_lo, i_hi = r("intelligence", 1.0, 10.0)
     return (math.log10(c_lo), math.log10(c_hi), s_lo, s_hi, i_lo, i_hi)
 
 
@@ -151,7 +160,7 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
     yr = _axis_render_range(visible, y_axis)
     zr = _axis_render_range(visible, z_axis)
     ticks = {
-        x_axis: _axis_ticks(xr[0], xr[1], log=log_x and x_axis == "cost", steps=steps),
+        x_axis: _axis_ticks(xr[0], xr[1], log=x_axis == "cost", steps=steps),
         y_axis: _axis_ticks(yr[0], yr[1], log=False, steps=steps),
         z_axis: _axis_ticks(zr[0], zr[1], log=False, steps=steps),
     }
@@ -171,7 +180,7 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
                 c = grids["cost"][idxs[slot_for.get("cost", 0)]]
                 a = grids["intelligence"][idxs[slot_for.get("intelligence", 0)]]
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
-                vv[i, j, k] = max(0.0, min(1.0, _score(c, a, s, cb, w_cost, w_speed, w_intel)))
+                vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel)
 
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
@@ -379,13 +388,13 @@ def main():
     cb = _compute_bounds(visible)
     c_lo_log, c_hi_log, s_lo, s_hi, i_lo, i_hi = cb
     cspan = (c_hi_log - c_lo_log) or 1
-    cheap = visible["cost"].apply(lambda c: 1 - min(1, max(0, (math.log10(max(c, 1e-6)) - c_lo_log) / cspan)))
+    cheap = visible["cost"].apply(lambda c: 1 - (math.log10(max(c, 1e-6)) - c_lo_log) / cspan)
     visible = visible.copy()
     wsum = max(w_cost + w_speed + w_intel, 1)
-    s_norm = ((visible["speed"] - s_lo) / (s_hi - s_lo)).clip(0, 1)
-    i_norm = ((visible["intelligence"] - i_lo) / (i_hi - i_lo)).clip(0, 1)
+    s_norm = (visible["speed"] - s_lo) / (s_hi - s_lo)
+    i_norm = (visible["intelligence"] - i_lo) / (i_hi - i_lo)
     visible["value"] = (w_cost * cheap + w_speed * s_norm + w_intel * i_norm) / wsum
-    visible["value"] = visible["value"].clip(0, 1)
+    value_range = (float(visible["value"].min()), float(visible["value"].max()))
 
     if ball_size == "Parameters":
         pvals = visible["params"].dropna()
@@ -432,7 +441,7 @@ def main():
         if use_continuous:
             fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="value", color_continuous_scale=VALUE_SCALE,
-                                range_color=(0, 1),
+                                range_color=value_range,
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         else:
@@ -465,7 +474,7 @@ def main():
     else:
         if use_continuous:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="value",
-                             color_continuous_scale=VALUE_SCALE, range_color=(0, 1),
+                             color_continuous_scale=VALUE_SCALE, range_color=value_range,
                              hover_name="name", hover_data=hover_data, title=None)
         else:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
