@@ -120,9 +120,21 @@ def _axis_format(axis):
     return {"cost": "%.6f", "speed": "%.6f", "intelligence": "%.6f", "context": "%.0f"}.get(axis, "%.6f")
 
 
+def _axis_render_range(visible, metric):
+    lo, hi = _metric_axis_range(visible, metric)
+    if metric == "cost":
+        lo = 10 ** (math.log10(lo) - 0.4)
+        hi = 10 ** (math.log10(hi) + 0.4)
+    else:
+        span = (hi - lo) or 1
+        lo = lo - 0.05 * span
+        hi = hi + 0.05 * span
+    return lo, hi
+
+
 def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
     for dim, ax in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
-        lo, hi = _metric_axis_range(visible, ax)
+        lo, hi = _axis_render_range(visible, ax)
         is_log = ax == "cost" and log_x
         lv = math.log10(lo) if is_log else lo
         hv = math.log10(hi) if is_log else hi
@@ -135,9 +147,9 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
 
 def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb, steps=10):
     med = visible[["cost", "intelligence", "speed"]].median()
-    xr = _metric_axis_range(visible, x_axis)
-    yr = _metric_axis_range(visible, y_axis)
-    zr = _metric_axis_range(visible, z_axis)
+    xr = _axis_render_range(visible, x_axis)
+    yr = _axis_render_range(visible, y_axis)
+    zr = _axis_render_range(visible, z_axis)
     ticks = {
         x_axis: _axis_ticks(xr[0], xr[1], log=log_x and x_axis == "cost", steps=steps),
         y_axis: _axis_ticks(yr[0], yr[1], log=False, steps=steps),
@@ -172,11 +184,7 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
         showscale=False,
         showlegend=False,
         hoverinfo="skip",
-        caps=dict(
-            x_show=True, x_fill=1.0,
-            y_show=True, y_fill=1.0,
-            z_show=True, z_fill=1.0,
-        ),
+        caps=dict(x_show=False, y_show=False, z_show=False),
     )
 
 
