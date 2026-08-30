@@ -166,13 +166,17 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
         value=vv.ravel(),
         cmin=float(vv.min()), cmax=float(vv.max()),
         isomin=float(vv.min()), isomax=float(vv.max()),
-        opacity=0.14,
-        surface_count=18,
+        opacity=0.16,
+        surface_count=22,
         colorscale=VALUE_SCALE,
         showscale=False,
         showlegend=False,
         hoverinfo="skip",
-        caps=dict(x_show=False, y_show=False, z_show=False),
+        caps=dict(
+            x_show=True, x_min=0.3, x_max=0.3,
+            y_show=True, y_min=0.3, y_max=0.3,
+            z_show=True, z_min=0.3, z_max=0.3,
+        ),
     )
 
 
