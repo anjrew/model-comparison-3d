@@ -249,19 +249,21 @@ def main():
         api.save_aa_key(key)
 
     catalog = get_catalog()
-    st.sidebar.text_input(
-        "Artificial Analysis API key (free tier works)",
-        type="password",
-        key="aa_key_input",
-        on_change=_aa_key_cb,
-        help="Get a free key: sign up at artificialanalysis.ai, then open "
-             "https://artificialanalysis.ai/orgs/<your-username>/api-access, create a key, "
-             "and paste it here. Saved to ~/.config/model-compare/aa_key.",
-    )
-    if st.sidebar.button("Clear saved key"):
-        st.session_state.aa_key_input = ""
-        api.save_aa_key("")
-        st.rerun()
+    with st.sidebar:
+        with st.expander("🔑 API key & data", expanded=False):
+            st.text_input(
+                "Artificial Analysis API key (free tier)",
+                type="password",
+                key="aa_key_input",
+                on_change=_aa_key_cb,
+                help="Get a free key: sign up at artificialanalysis.ai, then open "
+                     "https://artificialanalysis.ai/orgs/<your-username>/api-access, create a key, "
+                     "and paste it here. Saved to ~/.config/model-compare/aa_key.",
+            )
+            if st.button("Clear saved key"):
+                st.session_state.aa_key_input = ""
+                api.save_aa_key("")
+                st.rerun()
 
     aa_key = st.session_state.aa_key_input.strip() or None
     aa = get_aa(aa_key) if aa_key else None
@@ -271,51 +273,48 @@ def main():
     df = pd.DataFrame(scored)
 
     with st.sidebar:
-        st.header("⚙️ Controls")
-
         live = sum(1 for m in scored if m["scores_live"])
-        st.caption(f"Source: models.dev — {len(df):,} models across {df['provider'].nunique():,} providers.")
-        st.caption(f"Speed/Intelligence: {live:,} live from Artificial Analysis" if live else "Speed/Intelligence: estimates (add AA API key for live values)")
+        st.caption(f"{len(df):,} models · {df['provider'].nunique():,} providers")
+        st.caption(f"{live:,} live AA scores" if live else "AA key optional (live speed/intelligence)")
 
-        st.subheader("📈 Chart type")
-        chart_mode = st.radio(
-            "3D needs WebGL. Auto picks the best option.",
-            ["Auto", "3D (WebGL)", "2D (fallback)"],
-            horizontal=True,
-            key="chart_mode",
-        )
-        detected = webgl_check()
-        st.caption(f"WebGL status: {'detecting…' if detected is None else detected}")
-        if chart_mode == "Auto":
-            chart_type = "2D (fallback)" if detected == "no" else "3D (WebGL)"
-        else:
-            chart_type = chart_mode
-        if detected == "no" and chart_type == "3D (WebGL)":
-            st.warning("⚠️ WebGL is disabled in this browser — 3D will not render.")
+        with st.expander("📈 Chart", expanded=True):
+            chart_mode = st.radio(
+                "3D needs WebGL. Auto picks the best option.",
+                ["Auto", "3D (WebGL)", "2D (fallback)"],
+                horizontal=True,
+                key="chart_mode",
+            )
+            detected = webgl_check()
+            st.caption(f"WebGL: {'detecting…' if detected is None else detected}")
+            if chart_mode == "Auto":
+                chart_type = "2D (fallback)" if detected == "no" else "3D (WebGL)"
+            else:
+                chart_type = chart_mode
+            if detected == "no" and chart_type == "3D (WebGL)":
+                st.warning("⚠️ WebGL is disabled in this browser — 3D will not render.")
 
-        st.divider()
+            x_axis = st.selectbox("X axis", list(AXES), index=0, key="x_axis")
+            y_axis = st.selectbox("Y axis", list(AXES), index=1, key="y_axis")
+            z_axis = st.selectbox("Z axis", list(AXES), index=2, key="z_axis")
+            log_x = st.checkbox("Log scale for cost", value=True, key="log_x")
 
-        st.subheader("🎚️ Axes")
-        x_axis = st.selectbox("X axis", list(AXES), index=0, key="x_axis")
-        y_axis = st.selectbox("Y axis", list(AXES), index=1, key="y_axis")
-        z_axis = st.selectbox("Z axis", list(AXES), index=2, key="z_axis")
-        log_x = st.checkbox("Log scale for cost", value=True, key="log_x")
-        ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
-        color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
-        show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
-        if show_field:
-            field_surfaces = st.slider("Field surfaces", 5, 60, 22, key="field_surfaces")
-            field_res = st.slider("Field density", 6, 20, 14, key="field_res")
-            field_opacity = st.slider("Field opacity", 1, 40, 14, key="field_opacity", format="%d%%") / 100
+        with st.expander("🎨 Field & weights", expanded=True):
+            ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
+            color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
+            show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
+            if show_field:
+                field_surfaces = st.slider("Field surfaces", 5, 60, 22, key="field_surfaces")
+                field_res = st.slider("Field density", 6, 20, 14, key="field_res")
+                field_opacity = st.slider("Field opacity", 1, 40, 14, key="field_opacity", format="%d%%") / 100
 
-        st.caption("⚖️ Value weights — tilt the gradient toward what matters")
-        w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
-        w_speed = st.slider("Speed weight", 0, 100, 33, key="w_speed")
-        w_intel = st.slider("Intelligence weight", 0, 100, 34, key="w_intel")
-        wsum = max(w_cost + w_speed + w_intel, 1)
-        st.caption(f"Normalized: {round(100 * w_cost / wsum)}% / {round(100 * w_speed / wsum)}% / {round(100 * w_intel / wsum)}%")
+            st.caption("⚖️ Value weights — tilt the gradient toward what matters")
+            w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
+            w_speed = st.slider("Speed weight", 0, 100, 33, key="w_speed")
+            w_intel = st.slider("Intelligence weight", 0, 100, 34, key="w_intel")
+            wsum = max(w_cost + w_speed + w_intel, 1)
+            st.caption(f"Normalized: {round(100 * w_cost / wsum)}% / {round(100 * w_speed / wsum)}% / {round(100 * w_intel / wsum)}%")
 
-        with st.expander("Axis ranges (override)"):
+        with st.expander("🎚️ Axis ranges", expanded=False):
             st.caption("Leave blank to auto-scale.")
             for dim, ax in (("X", x_axis), ("Y", y_axis), ("Z", z_axis)):
                 c1, c2 = st.columns(2)
@@ -324,64 +323,59 @@ def main():
                 with c2:
                     st.number_input(f"{dim} max ({ax})", value=None, step=_axis_step(ax), format=_axis_format(ax), key=f"rng_{ax}_max")
 
-        st.divider()
+        with st.expander("🔎 Filter", expanded=True):
+            search = st.text_input("Search model name", key="search")
+            providers = sorted(df["provider"].unique())
 
-        st.subheader("🔎 Filter")
-        search = st.text_input("Search model name", key="search")
-        providers = sorted(df["provider"].unique())
+            show_all = st.checkbox("Show all providers", value=True, key="show_all")
+            sel_providers = []
+            if not show_all:
+                with st.expander(f"Choose providers ({len(providers):,})"):
+                    prov_search = st.text_input("Search providers", key="prov_search")
+                    opts = [p for p in providers if prov_search.lower() in p.lower()]
+                    sel_providers = st.multiselect("Providers to show (empty = all)", opts, key="sel_providers")
+                    st.caption(f"Found {len(opts):,} matching providers.")
 
-        show_all = st.checkbox("Show all providers", value=True, key="show_all")
-        sel_providers = []
-        if not show_all:
-            with st.expander(f"Choose providers ({len(providers):,})"):
-                prov_search = st.text_input("Search providers", key="prov_search")
-                opts = [p for p in providers if prov_search.lower() in p.lower()]
-                sel_providers = st.multiselect("Providers to show (empty = all)", opts, key="sel_providers")
-                st.caption(f"Found {len(opts):,} matching providers.")
+            reasoning_only = st.checkbox("Reasoning models only", value=False, key="reasoning_only")
+            open_weights = st.checkbox("Open-weights only", value=False, key="open_weights")
+            st.caption("Context length (K tokens)")
+            ctx_c1, ctx_c2 = st.columns(2)
+            with ctx_c1:
+                min_context = st.number_input("Min", min_value=0, step=16, value=0, key="min_context")
+            with ctx_c2:
+                max_context = st.number_input("Max", min_value=0, step=16, value=0, key="max_context")
 
-        with st.expander(f"Browse all {len(providers):,} providers"):
-            counts = df.groupby("provider").size().sort_values(ascending=False).rename("models")
-            st.dataframe(counts, width="stretch")
+            with st.expander(f"Browse all {len(providers):,} providers"):
+                counts = df.groupby("provider").size().sort_values(ascending=False).rename("models")
+                st.dataframe(counts, width="stretch")
 
-        reasoning_only = st.checkbox("Reasoning models only", value=False, key="reasoning_only")
-        open_weights = st.checkbox("Open-weights only", value=False, key="open_weights")
-        ctx_c1, ctx_c2 = st.columns(2)
-        with ctx_c1:
-            min_context = st.number_input("Min context (K tokens)", min_value=0, step=16, value=0, key="min_context")
-        with ctx_c2:
-            max_context = st.number_input("Max context (K tokens)", min_value=0, step=16, value=0, key="max_context")
+        with st.expander("⭐ Highlight", expanded=False):
+            hl_search = st.text_input("Search model to highlight", key="hl_search")
+            hl_opts = [n for n in sorted(df["name"].unique()) if hl_search.lower() in n.lower()]
+            hl_names = st.multiselect("Models to highlight", hl_opts, max_selections=10, key="hl_names")
+            st.caption("Highlighted models render as large gold markers.")
 
-        st.divider()
+        with st.expander("➕ Custom models", expanded=False):
+            with st.form("add_model", clear_on_submit=True):
+                name = st.text_input("Model name")
+                provider = st.text_input("Provider")
+                cost = st.number_input("Cost ($/1M input)", min_value=0.0, step=0.01)
+                speed = st.slider("Speed (1-10)", 1, 10, 7)
+                intelligence = st.slider("Intelligence (1-10)", 1.0, 10.0, 7.0, 0.1)
+                if st.form_submit_button("Add"):
+                    if name and provider:
+                        st.session_state.custom_models.append(
+                            {"id": f"custom/{name}", "name": name, "provider": provider, "cost": cost,
+                             "speed": speed, "intelligence": intelligence, "context": 0,
+                             "reasoning": False, "open_weights": False, "scores_live": True}
+                        )
+                        st.rerun()
 
-        st.subheader("⭐ Highlight")
-        hl_search = st.text_input("Search model to highlight", key="hl_search")
-        hl_opts = [n for n in sorted(df["name"].unique()) if hl_search.lower() in n.lower()]
-        hl_names = st.multiselect("Models to highlight", hl_opts, max_selections=10, key="hl_names")
-        st.caption("Highlighted models render as large gold markers.")
-
-        st.divider()
-
-        st.subheader("➕ Add custom model")
-        with st.form("add_model", clear_on_submit=True):
-            name = st.text_input("Model name")
-            provider = st.text_input("Provider")
-            cost = st.number_input("Cost ($/1M input)", min_value=0.0, step=0.01)
-            speed = st.slider("Speed (1-10)", 1, 10, 7)
-            intelligence = st.slider("Intelligence (1-10)", 1.0, 10.0, 7.0, 0.1)
-            if st.form_submit_button("Add"):
-                if name and provider:
-                    st.session_state.custom_models.append(
-                        {"id": f"custom/{name}", "name": name, "provider": provider, "cost": cost,
-                         "speed": speed, "intelligence": intelligence, "context": 0,
-                         "reasoning": False, "open_weights": False, "scores_live": True}
-                    )
+            if st.session_state.custom_models:
+                to_remove = st.selectbox("Remove custom model", [m["name"] for m in st.session_state.custom_models])
+                if st.button("Remove"):
+                    st.session_state.custom_models = [m for m in st.session_state.custom_models if m["name"] != to_remove]
                     st.rerun()
-
-        if st.session_state.custom_models:
-            to_remove = st.selectbox("Remove custom model", [m["name"] for m in st.session_state.custom_models])
-            if st.button("Remove"):
-                st.session_state.custom_models = [m for m in st.session_state.custom_models if m["name"] != to_remove]
-                st.rerun()
 
         if st.button("Clear cache & reload"):
             get_catalog.clear()
