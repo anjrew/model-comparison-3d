@@ -347,24 +347,36 @@ def main():
         sizes = pd.Series([8] * len(visible), index=visible.index)
         size_label = "Uniform ball size"
 
-    hover_data = {"provider": True, "cost": ":.2f", "speed": True, "intelligence": True,
-                  "context": True, "reasoning": True, "params": ":.1f"}
-    if live:
-        hover_data["aa_intelligence_index"] = True
-        hover_data["aa_tokens_per_sec"] = ":.1f"
+    hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)",
+                  "Context", "Params (B)", "Reasoning", "AA Intell. Index", "AA tokens/s"]
+
+    def _hnum(v, fmt="{:.1f}"):
+        return "n/a" if v is None or (isinstance(v, float) and v != v) else fmt.format(v)
+
+    hdata = visible.copy()
+    hdata["Provider"] = hdata["provider"].fillna("n/a")
+    hdata["Cost ($/1M in)"] = hdata["cost"].map(lambda v: _hnum(v, "{:.2f}"))
+    hdata["Speed (1-10)"] = hdata["speed"].map(lambda v: _hnum(v, "{:.1f}"))
+    hdata["Intelligence (1-10)"] = hdata["intelligence"].map(lambda v: _hnum(v, "{:.1f}"))
+    hdata["Context"] = hdata["context"].map(lambda v: _hnum(v, "{:,.0f}"))
+    hdata["Params (B)"] = hdata["params"].map(lambda v: _hnum(v, "{:.1f}"))
+    hdata["Reasoning"] = hdata["reasoning"].map(lambda v: "Yes" if v else "No")
+    hdata["AA Intell. Index"] = hdata["aa_intelligence_index"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_intelligence_index" in hdata.columns else "n/a"
+    hdata["AA tokens/s"] = hdata["aa_tokens_per_sec"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_tokens_per_sec" in hdata.columns else "n/a"
+    hover_data = {c: True for c in hover_cols}
 
     use_continuous = color_mode == "Value score"
     hl_mask = visible["name"].isin(hl_names) if hl_names else pd.Series(False, index=visible.index)
     base_opac = 0.18 if len(hl_names) else 0.45
     if chart_type == "3D (WebGL)":
         if use_continuous:
-            fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
+            fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="value", color_continuous_scale=VALUE_SCALE,
                                 range_color=(0, 1),
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         else:
-            fig = px.scatter_3d(visible, x=x_axis, y=y_axis, z=z_axis,
+            fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="provider", color_discrete_map=color_map,
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
@@ -392,11 +404,11 @@ def main():
             fig.update_layout(scene=dict(xaxis=dict(type="log")))
     else:
         if use_continuous:
-            fig = px.scatter(visible, x=x_axis, y=y_axis, color="value",
+            fig = px.scatter(hdata, x=x_axis, y=y_axis, color="value",
                              color_continuous_scale=VALUE_SCALE, range_color=(0, 1),
                              hover_name="name", hover_data=hover_data, title=None)
         else:
-            fig = px.scatter(visible, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
+            fig = px.scatter(hdata, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                              hover_name="name", hover_data=hover_data, title=None)
         fig.update_traces(marker=dict(size=sizes, opacity=base_opac))
         if len(hl_names):
