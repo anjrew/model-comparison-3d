@@ -154,7 +154,7 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
             getattr(fig, f"update_{dim}axes")(range=rng)
 
 
-def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb, steps=10):
+def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb, steps=14):
     med = visible[["cost", "intelligence", "speed"]].median()
     xr = _axis_render_range(visible, x_axis)
     yr = _axis_render_range(visible, y_axis)
@@ -192,8 +192,8 @@ def build_value_volume(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, 
         value=vv.ravel(),
         cmin=cmin, cmax=cmax,
         isomin=float(vv.min()), isomax=float(vv.max()),
-        opacity=0.16,
-        surface_count=22,
+        opacity=0.08,
+        surface_count=48,
         colorscale=VALUE_SCALE,
         showscale=False,
         showlegend=False,
