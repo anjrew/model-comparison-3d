@@ -62,10 +62,14 @@ VALUE_SCALE = [
 ]
 
 
-def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel):
+def _cost_transform(c, log_cost):
+    return math.log10(max(c, 1e-6)) if log_cost else c
+
+
+def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel, log_cost):
     c_lo, c_hi, s_lo, s_hi, i_lo, i_hi = cb
     cspan = (c_hi - c_lo) or 1
-    cheap = 1 - (math.log10(max(cost_v, 1e-6)) - c_lo) / cspan
+    cheap = 1 - (_cost_transform(cost_v, log_cost) - c_lo) / cspan
     sspan = (s_hi - s_lo) or 1
     sn = (speed_v - s_lo) / sspan
     ispan = (i_hi - i_lo) or 1
@@ -97,20 +101,13 @@ def _metric_axis_range(visible, metric):
     return lo, hi
 
 
-def _compute_bounds(visible):
-    def r(m, dlo, dhi):
-        lo = st.session_state.get(f"rng_{m}_min")
-        hi = st.session_state.get(f"rng_{m}_max")
-        lo = float(lo) if lo is not None else dlo
-        hi = float(hi) if hi is not None else dhi
-        if hi <= lo:
-            hi = lo + 1e-6
-        return lo, hi
-
-    c_lo, c_hi = r("cost", 0.001, 100.0)
-    s_lo, s_hi = r("speed", 1.0, 10.0)
-    i_lo, i_hi = r("intelligence", 1.0, 10.0)
-    return (math.log10(c_lo), math.log10(c_hi), s_lo, s_hi, i_lo, i_hi)
+def _compute_bounds(visible, log_cost):
+    c_lo, c_hi = _axis_render_range(visible, "cost")
+    s_lo, s_hi = _axis_render_range(visible, "speed")
+    i_lo, i_hi = _axis_render_range(visible, "intelligence")
+    c_lo = _cost_transform(c_lo, log_cost)
+    c_hi = _cost_transform(c_hi, log_cost)
+    return (c_lo, c_hi, s_lo, s_hi, i_lo, i_hi)
 
 
 def _axis_ticks(lo, hi, log=False, steps=6):
@@ -162,9 +159,9 @@ def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w
     yr = _axis_render_range(visible, y_axis)
     zr = _axis_render_range(visible, z_axis)
     ticks = {
-        x_axis: _axis_ticks(xr[0], xr[1], log=x_axis == "cost", steps=steps),
-        y_axis: _axis_ticks(yr[0], yr[1], log=False, steps=steps),
-        z_axis: _axis_ticks(zr[0], zr[1], log=False, steps=steps),
+        x_axis: _axis_ticks(xr[0], xr[1], log=log_x and x_axis == "cost", steps=steps),
+        y_axis: _axis_ticks(yr[0], yr[1], log=log_x and y_axis == "cost", steps=steps),
+        z_axis: _axis_ticks(zr[0], zr[1], log=log_x and z_axis == "cost", steps=steps),
     }
     grids = {
         "cost": ticks.get("cost", np.full(steps, med["cost"])),
@@ -182,7 +179,7 @@ def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w
                 c = grids["cost"][idxs[slot_for.get("cost", 0)]]
                 a = grids["intelligence"][idxs[slot_for.get("intelligence", 0)]]
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
-                vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel)
+                vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel, log_x)
 
     vv = vv.ravel()
     cmin = float(np.percentile(vv, 2))
@@ -391,10 +388,10 @@ def main():
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
 
-    cb = _compute_bounds(visible)
-    c_lo_log, c_hi_log, s_lo, s_hi, i_lo, i_hi = cb
-    cspan = (c_hi_log - c_lo_log) or 1
-    cheap = visible["cost"].apply(lambda c: 1 - (math.log10(max(c, 1e-6)) - c_lo_log) / cspan)
+    cb = _compute_bounds(visible, log_x)
+    c_lo, c_hi, s_lo, s_hi, i_lo, i_hi = cb
+    cspan = (c_hi - c_lo) or 1
+    cheap = visible["cost"].apply(lambda c: 1 - (_cost_transform(c, log_x) - c_lo) / cspan)
     visible = visible.copy()
     wsum = max(w_cost + w_speed + w_intel, 1)
     s_norm = (visible["speed"] - s_lo) / (s_hi - s_lo)
