@@ -15,7 +15,7 @@ STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_stat
 
 STATE_KEYS = [
     "chart_mode", "ball_size", "color_mode", "show_field", "log_x",
-    "field_res", "field_opacity",
+    "field_surfaces", "field_res", "field_opacity",
     "x_axis", "y_axis", "z_axis",
     "w_cost", "w_speed", "w_intel",
     "search", "show_all", "prov_search", "sel_providers",
@@ -153,7 +153,7 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
 
 
 def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb,
-                      steps=14, opacity=0.12):
+                      steps=14, opacity=0.14, surfaces=22):
     med = visible[["cost", "intelligence", "speed"]].median()
     xr = _axis_render_range(visible, x_axis)
     yr = _axis_render_range(visible, y_axis)
@@ -187,13 +187,18 @@ def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w
     if cmax <= cmin:
         cmin, cmax = float(vv.min()), float(vv.max())
 
-    return go.Scatter3d(
+    return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
-        mode="markers",
-        marker=dict(size=4, color=vv, colorscale=VALUE_SCALE,
-                    cmin=cmin, cmax=cmax, opacity=opacity, showscale=False),
-        hoverinfo="skip",
+        value=vv.ravel(),
+        cmin=cmin, cmax=cmax,
+        isomin=float(vv.min()), isomax=float(vv.max()),
+        opacity=opacity,
+        surface_count=surfaces,
+        colorscale=VALUE_SCALE,
+        showscale=False,
         showlegend=False,
+        hoverinfo="skip",
+        caps=dict(x_show=False, y_show=False, z_show=False),
     )
 
 
@@ -282,8 +287,9 @@ def main():
         color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
         show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
         if show_field:
+            field_surfaces = st.slider("Field surfaces", 5, 60, 22, key="field_surfaces")
             field_res = st.slider("Field density", 6, 20, 14, key="field_res")
-            field_opacity = st.slider("Field opacity", 1, 40, 12, key="field_opacity", format="%d%%") / 100
+            field_opacity = st.slider("Field opacity", 1, 40, 14, key="field_opacity", format="%d%%") / 100
 
         st.caption("⚖️ Value weights — tilt the gradient toward what matters")
         w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
@@ -456,7 +462,8 @@ def main():
         if show_field and len(visible) >= 4:
             fig.add_trace(build_value_field(visible, x_axis, y_axis, z_axis, log_x,
                                             w_cost, w_speed, w_intel, cb,
-                                            steps=field_res, opacity=field_opacity))
+                                            steps=field_res, opacity=field_opacity,
+                                            surfaces=field_surfaces))
         fig.update_traces(marker=dict(size=sizes, opacity=base_opac), selector=dict(type="scatter3d"))
         if len(hl_names):
             hdf = visible[hl_mask]
