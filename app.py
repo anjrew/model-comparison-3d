@@ -139,6 +139,18 @@ def _axis_render_range(visible, metric):
     return lo, hi
 
 
+def _field_grid_range(visible, metric):
+    lo, hi = _metric_axis_range(visible, metric)
+    if metric == "cost":
+        lo = 10 ** (math.log10(lo) - 0.9)
+        hi = 10 ** (math.log10(hi) + 0.9)
+    else:
+        span = (hi - lo) or 1
+        lo = lo - 0.2 * span
+        hi = hi + 0.2 * span
+    return lo, hi
+
+
 def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
     for dim, ax in (("x", x_axis), ("y", y_axis), ("z", z_axis)):
         lo, hi = _axis_render_range(visible, ax)
@@ -155,9 +167,9 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
 def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb,
                       steps=14, opacity=0.14, surfaces=22):
     med = visible[["cost", "intelligence", "speed"]].median()
-    xr = _axis_render_range(visible, x_axis)
-    yr = _axis_render_range(visible, y_axis)
-    zr = _axis_render_range(visible, z_axis)
+    xr = _field_grid_range(visible, x_axis)
+    yr = _field_grid_range(visible, y_axis)
+    zr = _field_grid_range(visible, z_axis)
     ticks = {
         x_axis: _axis_ticks(xr[0], xr[1], log=log_x and x_axis == "cost", steps=steps),
         y_axis: _axis_ticks(yr[0], yr[1], log=log_x and y_axis == "cost", steps=steps),
