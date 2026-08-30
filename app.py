@@ -102,7 +102,15 @@ def _metric_axis_range(visible, metric):
 
 
 def _compute_bounds(visible, log_cost):
-    c_lo, c_hi = _axis_render_range(visible, "cost")
+    c_lo, c_hi = 0.01, 10.0
+    lo_ov = st.session_state.get("rng_cost_min")
+    hi_ov = st.session_state.get("rng_cost_max")
+    if lo_ov is not None:
+        c_lo = float(lo_ov)
+    if hi_ov is not None:
+        c_hi = float(hi_ov)
+    if c_hi <= c_lo:
+        c_hi = c_lo + 1e-6
     s_lo, s_hi = _axis_render_range(visible, "speed")
     i_lo, i_hi = _axis_render_range(visible, "intelligence")
     c_lo = _cost_transform(c_lo, log_cost)
@@ -194,10 +202,7 @@ def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w
                 vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel, log_x)
 
     vv = vv.ravel()
-    cmin = float(np.percentile(vv, 2))
-    cmax = float(np.percentile(vv, 98))
-    if cmax <= cmin:
-        cmin, cmax = float(vv.min()), float(vv.max())
+    cmin, cmax = 0.0, 1.0
 
     return go.Volume(
         x=xx.ravel(), y=yy.ravel(), z=zz.ravel(),
@@ -415,8 +420,7 @@ def main():
     s_norm = (visible["speed"] - s_lo) / (s_hi - s_lo)
     i_norm = (visible["intelligence"] - i_lo) / (i_hi - i_lo)
     visible["value"] = (w_cost * cheap + w_speed * s_norm + w_intel * i_norm) / wsum
-    vp = visible["value"].to_numpy(dtype=float)
-    value_range = (float(np.percentile(vp, 2)), float(np.percentile(vp, 98)))
+    value_range = (0.0, 1.0)
 
     if ball_size == "Parameters":
         pvals = visible["params"].dropna()
