@@ -14,7 +14,7 @@ import models_api as api
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_state.json")
 
 STATE_KEYS = [
-    "chart_mode", "ball_size", "color_mode", "show_field", "log_x",
+    "chart_mode", "ball_size", "size_scale", "color_mode", "show_field", "log_x",
     "field_surfaces", "field_res", "field_opacity",
     "x_axis", "y_axis", "z_axis",
     "w_cost", "w_speed", "w_intel",
@@ -61,6 +61,29 @@ VALUE_SCALE = [
     (0.80, "rgb(250,230,0)"),
     (1.00, "rgb(70,200,80)"),
 ]
+
+_BALL_QS = tuple(round(i / 40, 4) for i in range(41))
+_BALL_SIZES = tuple(1.0 + 199.0 * q for q in _BALL_QS)
+
+
+def _ball_size(v, anchors):
+    if v is None or v != v:
+        return 8.0
+    if v <= 0:
+        return _BALL_SIZES[0]
+    lv = math.log10(float(v))
+    if lv <= anchors[0]:
+        return _BALL_SIZES[0]
+    if lv >= anchors[-1]:
+        return _BALL_SIZES[-1]
+    for i in range(len(anchors) - 1):
+        if lv <= anchors[i + 1]:
+            span = anchors[i + 1] - anchors[i]
+            if span <= 0:
+                return _BALL_SIZES[i]
+            frac = (lv - anchors[i]) / span
+            return _BALL_SIZES[i] + frac * (_BALL_SIZES[i + 1] - _BALL_SIZES[i])
+    return _BALL_SIZES[-1]
 
 
 def _cost_transform(c, log_cost):
@@ -273,10 +296,24 @@ def main():
     scored = api.apply_scores(models, aa=aa)
     df = pd.DataFrame(scored)
 
+    no_ctx = df["context"].isna() | (df["context"] <= 0)
+    unrendered = df.loc[no_ctx].copy()
+    unrendered["reason"] = np.where(
+        unrendered["context"].isna(), "Context length missing", "Context length = 0"
+    )
+    df = df.loc[~no_ctx].reset_index(drop=True)
+
     with st.sidebar:
         live = sum(1 for m in scored if m["scores_live"])
         st.caption(f"{len(df):,} models · {df['provider'].nunique():,} providers")
+        st.caption(f"{len(unrendered):,} excluded (no context)" if len(unrendered) else "no models excluded")
         st.caption(f"{live:,} live AA scores" if live else "AA key optional (live speed/intelligence)")
+
+        if len(unrendered):
+            with st.expander(f"🚫 Excluded: no context ({len(unrendered):,})"):
+                st.caption("Hidden because a context length is required to judge the model.")
+                st.dataframe(unrendered[["name", "provider", "country", "reason"]],
+                             width="stretch", hide_index=True)
 
         with st.expander("📈 Chart", expanded=True):
             chart_mode = st.radio(
@@ -301,6 +338,9 @@ def main():
 
         with st.expander("🎨 Field & weights", expanded=True):
             ball_size = st.radio("Ball size", ["Parameters", "Context", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
+            if ball_size != "Uniform":
+                st.radio("Size scale", ["Log", "Linear"], horizontal=True, key="size_scale", index=0,
+                         help="Log spreads wide ranges (e.g. context) more evenly; Linear maps values directly.")
             color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
             show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
             if show_field:
@@ -369,11 +409,12 @@ def main():
                 cost = st.number_input("Cost ($/1M input)", min_value=0.0, step=0.01)
                 speed = st.slider("Speed (1-10)", 1, 10, 7)
                 intelligence = st.slider("Intelligence (1-10)", 1.0, 10.0, 7.0, 0.1)
+                context = st.number_input("Context (tokens)", min_value=0, step=1000, value=0)
                 if st.form_submit_button("Add"):
                     if name and provider:
                         st.session_state.custom_models.append(
                             {"id": f"custom/{name}", "name": name, "provider": provider, "cost": cost,
-                             "speed": speed, "intelligence": intelligence, "context": 0,
+                             "speed": speed, "intelligence": intelligence, "context": context,
                              "reasoning": False, "open_weights": False, "scores_live": True}
                         )
                         st.rerun()
@@ -427,36 +468,41 @@ def main():
     visible["value"] = (w_cost * cheap + w_speed * s_norm + w_intel * i_norm) / wsum
     value_range = (0.0, 1.0)
 
+    size_scale = st.session_state.get("size_scale", "Log")
     if ball_size == "Parameters":
-        pvals = visible["params"].dropna()
-        if len(pvals):
-            lo, hi = math.log10(max(pvals.min(), 0.1)), math.log10(max(pvals.max(), 0.1))
-            span = (hi - lo) or 1
-            sizes = visible["params"].apply(
-                lambda p: 5 + 30 * (math.log10(max(p, 0.1)) - lo) / span if p and p == p else 8
-            )
-        else:
-            sizes = pd.Series([8] * len(visible), index=visible.index)
-        size_label = "Ball size = parameters (B)"
+        raw, size_label = visible["params"], "Ball size = parameters (B)"
     elif ball_size == "Context":
-        cvals = visible["context"].dropna()
-        if len(cvals):
-            lo, hi = math.log10(max(cvals.min(), 1)), math.log10(max(cvals.max(), 1))
-            span = (hi - lo) or 1
-            sizes = visible["context"].apply(
-                lambda c: 5 + 30 * (math.log10(max(c, 1)) - lo) / span if c and c == c else 8
-            )
-        else:
-            sizes = pd.Series([8] * len(visible), index=visible.index)
-        size_label = "Ball size = context (tokens)"
+        raw, size_label = visible["context"], "Ball size = context (tokens)"
     elif ball_size == "Z-axis value":
-        vmin, vmax = visible[z_axis].min(), visible[z_axis].max()
-        span = (vmax - vmin) or 1
-        sizes = 5 + 25 * (visible[z_axis] - vmin) / span
-        size_label = f"Ball size = {AXES[z_axis]}"
+        raw, size_label = visible[z_axis], f"Ball size = {AXES[z_axis]}"
     else:
+        raw, size_label = None, "Uniform ball size"
+
+    if raw is None:
         sizes = pd.Series([8] * len(visible), index=visible.index)
-        size_label = "Uniform ball size"
+    else:
+        mapped = pd.to_numeric(raw, errors="coerce")
+        if size_scale == "Log":
+            pos = mapped.dropna()
+            pos = pos[pos > 0]
+            if len(pos):
+                logv = pos.map(lambda v: math.log10(float(v)))
+                anchors = [float(logv.quantile(q)) for q in _BALL_QS]
+                sizes = mapped.map(lambda v: _ball_size(v, anchors))
+            else:
+                sizes = pd.Series([8] * len(visible), index=visible.index)
+        else:
+            good = mapped.dropna()
+            if len(good):
+                lo, hi = float(good.min()), float(good.max())
+                if hi <= lo:
+                    hi = lo + 1.0
+                span = (hi - lo) or 1.0
+                sizes = mapped.map(
+                    lambda v: 5 + 30 * (v - lo) / span if v == v else 8
+                )
+            else:
+                sizes = pd.Series([8] * len(visible), index=visible.index)
 
     hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)",
                   "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s"]
@@ -465,6 +511,7 @@ def main():
         return "n/a" if v is None or (isinstance(v, float) and v != v) else fmt.format(v)
 
     hdata = visible.copy()
+    hdata["_bsize"] = sizes
     hdata["Provider"] = hdata["provider"].fillna("n/a")
     hdata["Cost ($/1M in)"] = hdata["cost"].map(lambda v: _hnum(v, "{:.2f}"))
     hdata["Speed (1-10)"] = hdata["speed"].map(lambda v: _hnum(v, "{:.1f}"))
@@ -485,11 +532,13 @@ def main():
             fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="value", color_continuous_scale=VALUE_SCALE,
                                 range_color=value_range,
+                                size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         else:
             fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="provider", color_discrete_map=color_map,
+                                size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         if show_field and len(visible) >= 4:
@@ -497,14 +546,14 @@ def main():
                                             w_cost, w_speed, w_intel, cb,
                                             steps=field_res, opacity=field_opacity,
                                             surfaces=field_surfaces))
-        fig.update_traces(marker=dict(size=sizes, opacity=base_opac), selector=dict(type="scatter3d"))
+        fig.update_traces(marker=dict(opacity=base_opac), selector=dict(type="scatter3d"))
         if len(hl_names):
             hdf = visible[hl_mask]
             fig.add_trace(go.Scatter3d(
                 x=hdf[x_axis], y=hdf[y_axis], z=hdf[z_axis],
                 mode="markers",
                 name=f"Highlighted ({len(hdf)})",
-                marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=45), color="#FFD700",
+                marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=260), color="#FFD700",
                             opacity=1.0, line=dict(width=2, color="#000000")),
                 hovertemplate="%{customdata}<extra>Highlighted</extra>",
                 customdata=hdf["name"],
@@ -521,18 +570,20 @@ def main():
         if use_continuous:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="value",
                              color_continuous_scale=VALUE_SCALE, range_color=value_range,
+                             size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data, title=None)
         else:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
+                             size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data, title=None)
-        fig.update_traces(marker=dict(size=sizes, opacity=base_opac))
+        fig.update_traces(marker=dict(opacity=base_opac))
         if len(hl_names):
             hdf = visible[hl_mask]
             fig.add_trace(go.Scatter(
                 x=hdf[x_axis], y=hdf[y_axis],
                 mode="markers",
                 name=f"Highlighted ({len(hdf)})",
-                marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=45), color="#FFD700",
+                marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=260), color="#FFD700",
                             opacity=1.0, line=dict(width=2, color="#000000")),
                 hovertemplate="%{customdata}<extra>Highlighted</extra>",
                 customdata=hdf["name"],
