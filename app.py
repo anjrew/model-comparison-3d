@@ -306,14 +306,7 @@ def main():
     with st.sidebar:
         live = sum(1 for m in scored if m["scores_live"])
         st.caption(f"{len(df):,} models · {df['provider'].nunique():,} providers")
-        st.caption(f"{len(unrendered):,} excluded (no context)" if len(unrendered) else "no models excluded")
         st.caption(f"{live:,} live AA scores" if live else "AA key optional (live speed/intelligence)")
-
-        if len(unrendered):
-            with st.expander(f"🚫 Excluded: no context ({len(unrendered):,})"):
-                st.caption("Hidden because a context length is required to judge the model.")
-                st.dataframe(unrendered[["name", "provider", "country", "reason"]],
-                             width="stretch", hide_index=True)
 
         with st.expander("📈 Chart", expanded=True):
             chart_mode = st.radio(
@@ -454,6 +447,8 @@ def main():
 
     st.title("📊 3D LLM Model Comparison")
     st.caption(f"{len(visible):,} models shown. Hover for details; drag to rotate.")
+    if len(unrendered):
+        st.markdown(f"🚫 **{len(unrendered):,} models excluded** (no context) — [view list](#excluded-models)")
 
     color_map = {p: api.provider_color(p) for p in df["provider"].unique()}
 
@@ -479,7 +474,7 @@ def main():
         raw, size_label = None, "Uniform ball size"
 
     if raw is None:
-        sizes = pd.Series([8] * len(visible), index=visible.index)
+        sizes = pd.Series([10] * len(visible), index=visible.index)
     else:
         mapped = pd.to_numeric(raw, errors="coerce")
         if size_scale == "Log":
@@ -504,8 +499,12 @@ def main():
             else:
                 sizes = pd.Series([8] * len(visible), index=visible.index)
 
+    print(f"[ball-size] {size_label} · scale={size_scale} · min={float(sizes.min()):.1f}px "
+          f"max={float(sizes.max()):.1f}px · distinct={int(sizes.nunique())}", flush=True)
+
     hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)",
-                  "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s"]
+                  "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s",
+                  "Ball size (px)"]
 
     def _hnum(v, fmt="{:.1f}"):
         return "n/a" if v is None or (isinstance(v, float) and v != v) else fmt.format(v)
@@ -522,6 +521,7 @@ def main():
     hdata["Reasoning"] = hdata["reasoning"].map(lambda v: "Yes" if v else "No")
     hdata["AA Intell. Index"] = hdata["aa_intelligence_index"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_intelligence_index" in hdata.columns else "n/a"
     hdata["AA tokens/s"] = hdata["aa_tokens_per_sec"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_tokens_per_sec" in hdata.columns else "n/a"
+    hdata["Ball size (px)"] = sizes.map(lambda v: _hnum(v, "{:.0f}"))
     hover_data = {c: True for c in hover_cols}
 
     use_continuous = color_mode == "Value score"
@@ -546,7 +546,8 @@ def main():
                                             w_cost, w_speed, w_intel, cb,
                                             steps=field_res, opacity=field_opacity,
                                             surfaces=field_surfaces))
-        fig.update_traces(marker=dict(opacity=base_opac), selector=dict(type="scatter3d"))
+        fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac),
+                          selector=dict(type="scatter3d"))
         if len(hl_names):
             hdf = visible[hl_mask]
             fig.add_trace(go.Scatter3d(
@@ -576,7 +577,7 @@ def main():
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                              size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data, title=None)
-        fig.update_traces(marker=dict(opacity=base_opac))
+        fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac))
         if len(hl_names):
             hdf = visible[hl_mask]
             fig.add_trace(go.Scatter(
@@ -602,6 +603,7 @@ def main():
     _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible)
 
     st.plotly_chart(fig, width="stretch")
+    st.caption(f"Ball size: {size_label} · {float(sizes.min()):.0f}–{float(sizes.max()):.0f} px · {int(sizes.nunique()):,} distinct")
 
     st.subheader("Table")
     table_search = st.text_input("Search table (matches any column)", key="table_search")
@@ -611,6 +613,13 @@ def main():
         tbl = tbl[mask]
     st.dataframe(tbl, width="stretch", hide_index=True)
     st.caption(f"Showing {len(tbl):,} of {len(visible):,} filtered models.")
+
+    if len(unrendered):
+        st.markdown('<a id="excluded-models"></a>', unsafe_allow_html=True)
+        st.subheader(f"🚫 Excluded models — no context ({len(unrendered):,})")
+        st.caption("Hidden because a context length is required to judge the model.")
+        st.dataframe(unrendered[["name", "provider", "country", "reason"]],
+                     width="stretch", hide_index=True)
 
     _save_state()
 
