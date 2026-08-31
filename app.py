@@ -300,7 +300,7 @@ def main():
             log_x = st.checkbox("Log scale for cost", value=True, key="log_x")
 
         with st.expander("🎨 Field & weights", expanded=True):
-            ball_size = st.radio("Ball size", ["Parameters", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
+            ball_size = st.radio("Ball size", ["Parameters", "Context", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
             color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
             show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
             if show_field:
@@ -438,6 +438,17 @@ def main():
         else:
             sizes = pd.Series([8] * len(visible), index=visible.index)
         size_label = "Ball size = parameters (B)"
+    elif ball_size == "Context":
+        cvals = visible["context"].dropna()
+        if len(cvals):
+            lo, hi = math.log10(max(cvals.min(), 1)), math.log10(max(cvals.max(), 1))
+            span = (hi - lo) or 1
+            sizes = visible["context"].apply(
+                lambda c: 5 + 30 * (math.log10(max(c, 1)) - lo) / span if c and c == c else 8
+            )
+        else:
+            sizes = pd.Series([8] * len(visible), index=visible.index)
+        size_label = "Ball size = context (tokens)"
     elif ball_size == "Z-axis value":
         vmin, vmax = visible[z_axis].min(), visible[z_axis].max()
         span = (vmax - vmin) or 1
