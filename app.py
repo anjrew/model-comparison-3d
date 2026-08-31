@@ -14,7 +14,7 @@ import models_api as api
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_state.json")
 
 STATE_KEYS = [
-    "chart_mode", "ball_size", "size_scale", "color_mode", "show_field", "log_x",
+    "chart_mode", "ball_size", "size_scale", "ball_max", "color_mode", "show_field", "log_x",
     "field_surfaces", "field_res", "field_opacity",
     "x_axis", "y_axis", "z_axis",
     "w_cost", "w_speed", "w_intel",
@@ -63,27 +63,31 @@ VALUE_SCALE = [
 ]
 
 _BALL_QS = tuple(round(i / 40, 4) for i in range(41))
-_BALL_SIZES = tuple(1.0 + 199.0 * q for q in _BALL_QS)
+_BALL_MIN = 5.0
 
 
-def _ball_size(v, anchors):
+def _ball_sizes_t(max_px):
+    return tuple(_BALL_MIN + (float(max_px) - _BALL_MIN) * q for q in _BALL_QS)
+
+
+def _ball_size(v, anchors, sizes):
     if v is None or v != v:
         return 8.0
     if v <= 0:
-        return _BALL_SIZES[0]
+        return sizes[0]
     lv = math.log10(float(v))
     if lv <= anchors[0]:
-        return _BALL_SIZES[0]
+        return sizes[0]
     if lv >= anchors[-1]:
-        return _BALL_SIZES[-1]
+        return sizes[-1]
     for i in range(len(anchors) - 1):
         if lv <= anchors[i + 1]:
             span = anchors[i + 1] - anchors[i]
             if span <= 0:
-                return _BALL_SIZES[i]
+                return sizes[i]
             frac = (lv - anchors[i]) / span
-            return _BALL_SIZES[i] + frac * (_BALL_SIZES[i + 1] - _BALL_SIZES[i])
-    return _BALL_SIZES[-1]
+            return sizes[i] + frac * (sizes[i + 1] - sizes[i])
+    return sizes[-1]
 
 
 def _cost_transform(c, log_cost):
@@ -181,6 +185,22 @@ def _field_grid_range(visible, metric):
         lo = lo - 0.2 * span
         hi = hi + 0.2 * span
     return lo, hi
+
+
+def _adaptive_surfaces(visible, full, x_axis, y_axis, z_axis, log_x, surfaces):
+    ratios = []
+    for ax in (x_axis, y_axis, z_axis):
+        clo, chi = _metric_axis_range(visible, ax)
+        flo, fhi = _metric_axis_range(full, ax)
+        if ax == "cost":
+            clo, chi = math.log10(max(clo, 1e-9)), math.log10(max(chi, 1e-9))
+            flo, fhi = math.log10(max(flo, 1e-9)), math.log10(max(fhi, 1e-9))
+        cspan = (chi - clo) or 1e-9
+        fspan = (fhi - flo) or 1e-9
+        ratios.append(min(cspan / fspan, 1.0))
+    geomean = (ratios[0] * ratios[1] * ratios[2]) ** (1.0 / 3.0)
+    scale = 0.3 + 0.7 * geomean
+    return max(2, round(surfaces * scale))
 
 
 def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
@@ -329,11 +349,17 @@ def main():
             z_axis = st.selectbox("Z axis", list(AXES), index=2, key="z_axis")
             log_x = st.checkbox("Log scale for cost", value=True, key="log_x")
 
-        with st.expander("🎨 Field & weights", expanded=True):
+        with st.expander("🏀 Ball", expanded=True):
             ball_size = st.radio("Ball size", ["Parameters", "Context", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
             if ball_size != "Uniform":
-                st.radio("Size scale", ["Log", "Linear"], horizontal=True, key="size_scale", index=0,
-                         help="Log spreads wide ranges (e.g. context) more evenly; Linear maps values directly.")
+                st.radio("Size scale", ["Log", "Log²", "Linear"], horizontal=True, key="size_scale", index=0,
+                         help="Log: evenly spread across models (quantile-anchored). "
+                              "Log²: extreme double-log — amplifies small values, compresses large ones. "
+                              "Linear: raw values.")
+                st.slider("Max ball size (px)", 20, 200, 60, key="ball_max",
+                          help="Caps the largest node; the smallest stays 5px. Tune this if big/small contrast is too strong or weak.")
+
+        with st.expander("🎨 Field", expanded=False):
             color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
             show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
             if show_field:
@@ -341,7 +367,8 @@ def main():
                 field_res = st.slider("Field density", 6, 20, 14, key="field_res")
                 field_opacity = st.slider("Field opacity", 1, 40, 14, key="field_opacity", format="%d%%") / 100
 
-            st.caption("⚖️ Value weights — tilt the gradient toward what matters")
+        with st.expander("⚖️ Weights", expanded=False):
+            st.caption("Tilt the value gradient toward what matters")
             w_cost = st.slider("Cheapness (cost) weight", 0, 100, 33, key="w_cost")
             w_speed = st.slider("Speed weight", 0, 100, 33, key="w_speed")
             w_intel = st.slider("Intelligence weight", 0, 100, 34, key="w_intel")
@@ -476,6 +503,8 @@ def main():
     if raw is None:
         sizes = pd.Series([10] * len(visible), index=visible.index)
     else:
+        sizes_t = _ball_sizes_t(st.session_state.get("ball_max", 60))
+        s_lo, s_hi = sizes_t[0], sizes_t[-1]
         mapped = pd.to_numeric(raw, errors="coerce")
         if size_scale == "Log":
             pos = mapped.dropna()
@@ -483,7 +512,32 @@ def main():
             if len(pos):
                 logv = pos.map(lambda v: math.log10(float(v)))
                 anchors = [float(logv.quantile(q)) for q in _BALL_QS]
-                sizes = mapped.map(lambda v: _ball_size(v, anchors))
+                sizes = mapped.map(lambda v: _ball_size(v, anchors, sizes_t))
+            else:
+                sizes = pd.Series([8] * len(visible), index=visible.index)
+        elif size_scale == "Log²":
+            pos = mapped.dropna()
+            pos = pos[pos > 1]
+            if len(pos):
+                dlog = pos.map(lambda v: math.log10(math.log10(float(v))))
+                lo, hi = float(dlog.min()), float(dlog.max())
+                if hi <= lo:
+                    hi = lo + 1.0
+                span = (hi - lo) or 1.0
+
+                def _dsize(v):
+                    if v is None or v != v:
+                        return 8.0
+                    if v <= 1:
+                        return s_lo
+                    d = math.log10(math.log10(float(v)))
+                    if d <= lo:
+                        return s_lo
+                    if d >= hi:
+                        return s_hi
+                    return s_lo + (s_hi - s_lo) * (d - lo) / span
+
+                sizes = mapped.map(_dsize)
             else:
                 sizes = pd.Series([8] * len(visible), index=visible.index)
         else:
@@ -494,7 +548,7 @@ def main():
                     hi = lo + 1.0
                 span = (hi - lo) or 1.0
                 sizes = mapped.map(
-                    lambda v: 5 + 30 * (v - lo) / span if v == v else 8
+                    lambda v: s_lo + (s_hi - s_lo) * (v - lo) / span if v == v else 8
                 )
             else:
                 sizes = pd.Series([8] * len(visible), index=visible.index)
@@ -542,10 +596,11 @@ def main():
                                 hover_name="name", hover_data=hover_data,
                                 text=None, title=None)
         if show_field and len(visible) >= 4:
+            surfs = _adaptive_surfaces(visible, df, x_axis, y_axis, z_axis, log_x, field_surfaces)
             fig.add_trace(build_value_field(visible, x_axis, y_axis, z_axis, log_x,
                                             w_cost, w_speed, w_intel, cb,
                                             steps=field_res, opacity=field_opacity,
-                                            surfaces=field_surfaces))
+                                            surfaces=surfs))
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac),
                           selector=dict(type="scatter3d"))
         if len(hl_names):
@@ -602,8 +657,10 @@ def main():
 
     _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible)
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(fig, use_container_width=True)
     st.caption(f"Ball size: {size_label} · {float(sizes.min()):.0f}–{float(sizes.max()):.0f} px · {int(sizes.nunique()):,} distinct")
+    if chart_type == "3D (WebGL)" and show_field and len(visible) >= 4:
+        st.caption(f"Field surfaces: {surfs} (adapted from {field_surfaces} to the current axis ranges)")
 
     st.subheader("Table")
     table_search = st.text_input("Search table (matches any column)", key="table_search")
