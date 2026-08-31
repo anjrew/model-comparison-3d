@@ -12,17 +12,7 @@ import plotly.graph_objects as go
 import models_api as api
 
 STATE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_state.json")
-
-STATE_KEYS = [
-    "chart_mode", "ball_size", "size_scale", "ball_max", "color_mode", "show_field", "log_x",
-    "field_surfaces", "field_res", "field_opacity",
-    "x_axis", "y_axis", "z_axis",
-    "w_cost", "w_speed", "w_intel",
-    "search", "show_all", "prov_search", "sel_providers",
-    "reasoning_only", "open_weights", "min_context", "max_context",
-    "sel_continents", "sel_countries",
-    "hl_search", "hl_names", "table_search",
-]
+PROFILES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".app_profiles.json")
 
 
 def _load_state():
@@ -52,6 +42,47 @@ AXES = {
     "context": "Context (tokens)",
 }
 
+STATE_KEYS = [
+    "chart_mode", "ball_size", "size_scale", "log_exp", "ball_max", "color_mode", "show_field", "log_x",
+    "field_surfaces", "field_res", "field_opacity", "field_curve", "field_density",
+    "x_axis", "y_axis", "z_axis",
+    "w_cost", "w_speed", "w_intel",
+    "search", "show_all", "prov_search", "sel_providers",
+    "reasoning_only", "open_weights", "min_context", "max_context",
+    "sel_continents", "sel_countries",
+    "hl_search", "hl_names", "table_search",
+] + [f"rng_{m}_{b}" for m in AXES for b in ("min", "max")]
+
+
+def _load_profiles():
+    try:
+        if os.path.exists(PROFILES_FILE):
+            with open(PROFILES_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _save_profiles(profiles):
+    try:
+        with open(PROFILES_FILE, "w") as f:
+            json.dump(profiles, f, indent=2)
+    except Exception:
+        pass
+
+
+def _capture_state():
+    return {k: st.session_state[k] for k in STATE_KEYS if k in st.session_state}
+
+
+def _apply_state(data):
+    st.session_state["_pending_state"] = data
+
+
+def _reset_state():
+    st.session_state["_pending_reset"] = True
+
 DEFAULT_AXES = ["cost", "speed", "intelligence"]
 
 VALUE_SCALE = [
@@ -62,39 +93,14 @@ VALUE_SCALE = [
     (1.00, "rgb(70,200,80)"),
 ]
 
-_BALL_QS = tuple(round(i / 40, 4) for i in range(41))
 _BALL_MIN = 5.0
-
-
-def _ball_sizes_t(max_px):
-    return tuple(_BALL_MIN + (float(max_px) - _BALL_MIN) * q for q in _BALL_QS)
-
-
-def _ball_size(v, anchors, sizes):
-    if v is None or v != v:
-        return 8.0
-    if v <= 0:
-        return sizes[0]
-    lv = math.log10(float(v))
-    if lv <= anchors[0]:
-        return sizes[0]
-    if lv >= anchors[-1]:
-        return sizes[-1]
-    for i in range(len(anchors) - 1):
-        if lv <= anchors[i + 1]:
-            span = anchors[i + 1] - anchors[i]
-            if span <= 0:
-                return sizes[i]
-            frac = (lv - anchors[i]) / span
-            return sizes[i] + frac * (sizes[i + 1] - sizes[i])
-    return sizes[-1]
 
 
 def _cost_transform(c, log_cost):
     return math.log10(max(c, 1e-6)) if log_cost else c
 
 
-def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel, log_cost):
+def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel, log_cost, curve=1.0):
     c_lo, c_hi, s_lo, s_hi, i_lo, i_hi = cb
     cspan = (c_hi - c_lo) or 1
     cheap = 1 - (_cost_transform(cost_v, log_cost) - c_lo) / cspan
@@ -103,7 +109,15 @@ def _score(cost_v, intel_v, speed_v, cb, w_cost, w_speed, w_intel, log_cost):
     ispan = (i_hi - i_lo) or 1
     inn = (intel_v - i_lo) / ispan
     wsum = max(w_cost + w_speed + w_intel, 1e-9)
-    return (w_cost * cheap + w_speed * sn + w_intel * inn) / wsum
+    if curve <= 1.001:
+        return (w_cost * cheap + w_speed * sn + w_intel * inn) / wsum
+    cc = min(max(cheap, 0.0), 1.0)
+    ss = min(max(sn, 0.0), 1.0)
+    ii = min(max(inn, 0.0), 1.0)
+    d = (w_cost * (1.0 - cc) ** curve
+         + w_speed * (1.0 - ss) ** curve
+         + w_intel * (1.0 - ii) ** curve) ** (1.0 / curve)
+    return 1.0 - d / (wsum ** (1.0 / curve))
 
 
 def _metric_axis_range(visible, metric):
@@ -153,6 +167,21 @@ def _axis_ticks(lo, hi, log=False, steps=6):
         lo, hi = max(lo, 1e-6), max(hi, 1e-6)
         return np.logspace(np.log10(lo), np.log10(hi), steps)
     return np.linspace(lo, hi, steps)
+
+
+def _field_ticks(visible, metric, lo, hi, log, steps, density):
+    lin = _axis_ticks(lo, hi, log=log, steps=steps)
+    if density <= 0.0 or metric not in visible.columns:
+        return lin
+    vals = visible[metric].dropna()
+    if log:
+        vals = vals[vals > 0].map(lambda v: math.log10(float(v)))
+    if len(vals) < steps:
+        return lin
+    qt = np.quantile(vals.to_numpy(dtype=float), np.linspace(0.0, 1.0, steps))
+    if log:
+        qt = 10.0 ** qt
+    return (1.0 - density) * lin + density * qt
 
 
 def _axis_step(axis):
@@ -217,16 +246,14 @@ def _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, visible):
 
 
 def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w_intel, cb,
-                      steps=14, opacity=0.14, surfaces=22):
+                      steps=14, opacity=0.14, surfaces=22, curve=1.0, density=0.0):
     med = visible[["cost", "intelligence", "speed"]].median()
     xr = _field_grid_range(visible, x_axis)
     yr = _field_grid_range(visible, y_axis)
     zr = _field_grid_range(visible, z_axis)
-    ticks = {
-        x_axis: _axis_ticks(xr[0], xr[1], log=log_x and x_axis == "cost", steps=steps),
-        y_axis: _axis_ticks(yr[0], yr[1], log=log_x and y_axis == "cost", steps=steps),
-        z_axis: _axis_ticks(zr[0], zr[1], log=log_x and z_axis == "cost", steps=steps),
-    }
+    ticks = {}
+    for ax, rng in ((x_axis, xr), (y_axis, yr), (z_axis, zr)):
+        ticks[ax] = _field_ticks(visible, ax, rng[0], rng[1], log_x and ax == "cost", steps, density)
     grids = {
         "cost": ticks.get("cost", np.full(steps, med["cost"])),
         "intelligence": ticks.get("intelligence", np.full(steps, med["intelligence"])),
@@ -243,7 +270,7 @@ def build_value_field(visible, x_axis, y_axis, z_axis, log_x, w_cost, w_speed, w
                 c = grids["cost"][idxs[slot_for.get("cost", 0)]]
                 a = grids["intelligence"][idxs[slot_for.get("intelligence", 0)]]
                 s = grids["speed"][idxs[slot_for.get("speed", 0)]]
-                vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel, log_x)
+                vv[i, j, k] = _score(c, a, s, cb, w_cost, w_speed, w_intel, log_x, curve=curve)
 
     vv = vv.ravel()
     cmin, cmax = 0.0, 1.0
@@ -279,6 +306,18 @@ def get_aa(key):
 def main():
     st.set_page_config(page_title="LLM 3D Model Compare", page_icon="📊", layout="wide")
 
+    if st.session_state.pop("_pending_reset", False):
+        try:
+            os.remove(STATE_FILE)
+        except OSError:
+            pass
+        for k in [k for k in st.session_state if k in STATE_KEYS]:
+            del st.session_state[k]
+    pending = st.session_state.pop("_pending_state", None)
+    if pending:
+        for k, v in pending.items():
+            st.session_state[k] = v
+
     if "custom_models" not in st.session_state:
         st.session_state.custom_models = []
     if "aa_key_input" not in st.session_state:
@@ -304,10 +343,11 @@ def main():
                      "https://artificialanalysis.ai/orgs/<your-username>/api-access, create a key, "
                      "and paste it here. Saved to ~/.config/model-compare/aa_key.",
             )
-            if st.button("Clear saved key"):
+            def _clear_key():
                 st.session_state.aa_key_input = ""
                 api.save_aa_key("")
-                st.rerun()
+
+            st.button("Clear saved key", on_click=_clear_key)
 
     aa_key = st.session_state.aa_key_input.strip() or None
     aa = get_aa(aa_key) if aa_key else None
@@ -352,20 +392,31 @@ def main():
         with st.expander("🏀 Ball", expanded=True):
             ball_size = st.radio("Ball size", ["Parameters", "Context", "Z-axis value", "Uniform"], horizontal=True, key="ball_size")
             if ball_size != "Uniform":
-                st.radio("Size scale", ["Log", "Log²", "Linear"], horizontal=True, key="size_scale", index=0,
-                         help="Log: evenly spread across models (quantile-anchored). "
-                              "Log²: extreme double-log — amplifies small values, compresses large ones. "
-                              "Linear: raw values.")
-                st.slider("Max ball size (px)", 20, 200, 60, key="ball_max",
+                st.radio("Size scale", ["Log", "Logᵖ", "Linear"], horizontal=True, key="size_scale", index=0,
+                         help="The largest model in view always renders at the max size; everything else "
+                              "scales by its true ratio to it. Log: log-ratio (compresses). "
+                              "Logᵖ: log-ratio with a tunable exponent. Linear: proportional to the raw value.")
+                if st.session_state.get("size_scale", "Log") == "Logᵖ":
+                    st.slider("Log exponent", 0.25, 4.0, 1.0, 0.25, key="log_exp",
+                              help="Higher = more extreme: small values spread apart, large ones compress.")
+                st.slider("Max ball size (px)", 20, 400, 60, key="ball_max",
                           help="Caps the largest node; the smallest stays 5px. Tune this if big/small contrast is too strong or weak.")
 
         with st.expander("🎨 Field", expanded=False):
             color_mode = st.radio("Color by", ["Value score", "Provider"], horizontal=True, index=1, key="color_mode")
+            field_curve = st.slider("Field curvature", 1.0, 4.0, 1.0, 0.1, key="field_curve",
+                                    help="1 = flat planar isosurfaces (linear score). Higher curves them into "
+                                         "shells around the ideal corner (cheap + fast + smart). Also shapes "
+                                         "the value-score colors.")
             show_field = st.checkbox("Show value field (3D gradient)", value=True, key="show_field")
             if show_field:
                 field_surfaces = st.slider("Field surfaces", 5, 60, 22, key="field_surfaces")
                 field_res = st.slider("Field density", 6, 20, 14, key="field_res")
                 field_opacity = st.slider("Field opacity", 1, 40, 14, key="field_opacity", format="%d%%") / 100
+                st.slider("Grid follows model density", 0, 100, 50, key="field_density",
+                          format="%d%%",
+                          help="Shifts grid samples toward where models actually live (quantile spacing), "
+                               "concentrating the isosurface detail in the crowded region.")
 
         with st.expander("⚖️ Weights", expanded=False):
             st.caption("Tilt the value gradient toward what matters")
@@ -377,7 +428,11 @@ def main():
 
         with st.expander("🎚️ Axis ranges", expanded=False):
             st.caption("Leave blank to auto-scale.")
+            seen_metrics = set()
             for dim, ax in (("X", x_axis), ("Y", y_axis), ("Z", z_axis)):
+                if ax in seen_metrics:
+                    continue
+                seen_metrics.add(ax)
                 c1, c2 = st.columns(2)
                 with c1:
                     st.number_input(f"{dim} min ({ax})", value=None, step=_axis_step(ax), format=_axis_format(ax), key=f"rng_{ax}_min")
@@ -449,6 +504,40 @@ def main():
             get_catalog.clear()
             st.rerun()
 
+        with st.expander("⚙️ Configurations", expanded=False):
+            st.caption("Save and restore the full sidebar setup. The API key is not included.")
+            profiles = _load_profiles()
+            cfg_name = st.text_input("Configuration name", key="cfg_name")
+            b1, b2 = st.columns(2)
+            with b1:
+                save_clicked = st.button("💾 Save current", disabled=not cfg_name.strip(),
+                                         use_container_width=True)
+            with b2:
+                reset_clicked = st.button("↺ Reset to defaults", use_container_width=True)
+            if save_clicked:
+                profiles = _load_profiles()
+                profiles[cfg_name.strip()] = _capture_state()
+                _save_profiles(profiles)
+                st.toast(f"Saved configuration '{cfg_name.strip()}'")
+                st.rerun()
+            if reset_clicked:
+                _reset_state()
+                st.rerun()
+            if profiles:
+                pick = st.selectbox("Saved configurations", [""] + sorted(profiles.keys()))
+                l1, l2 = st.columns(2)
+                with l1:
+                    load_clicked = st.button("📥 Load", disabled=not pick, use_container_width=True)
+                with l2:
+                    del_clicked = st.button("🗑 Delete", disabled=not pick, use_container_width=True)
+                if load_clicked:
+                    _apply_state(profiles[pick])
+                    st.rerun()
+                if del_clicked:
+                    profiles.pop(pick, None)
+                    _save_profiles(profiles)
+                    st.rerun()
+
     visible = df
     if search:
         visible = visible[visible["name"].str.contains(search, case=False, na=False)]
@@ -470,6 +559,7 @@ def main():
 
     if visible.empty:
         st.warning("No models match the current filters.")
+        _save_state()
         return
 
     st.title("📊 3D LLM Model Comparison")
@@ -481,13 +571,13 @@ def main():
 
     cb = _compute_bounds(visible, log_x)
     c_lo, c_hi, s_lo, s_hi, i_lo, i_hi = cb
-    cspan = (c_hi - c_lo) or 1
-    cheap = visible["cost"].apply(lambda c: 1 - (_cost_transform(c, log_x) - c_lo) / cspan)
     visible = visible.copy()
     wsum = max(w_cost + w_speed + w_intel, 1)
-    s_norm = (visible["speed"] - s_lo) / (s_hi - s_lo)
-    i_norm = (visible["intelligence"] - i_lo) / (i_hi - i_lo)
-    visible["value"] = (w_cost * cheap + w_speed * s_norm + w_intel * i_norm) / wsum
+    visible["value"] = visible.apply(
+        lambda r: _score(r["cost"], r["intelligence"], r["speed"], cb,
+                         w_cost, w_speed, w_intel, log_x, curve=field_curve),
+        axis=1,
+    )
     value_range = (0.0, 1.0)
 
     size_scale = st.session_state.get("size_scale", "Log")
@@ -503,55 +593,32 @@ def main():
     if raw is None:
         sizes = pd.Series([10] * len(visible), index=visible.index)
     else:
-        sizes_t = _ball_sizes_t(st.session_state.get("ball_max", 60))
-        s_lo, s_hi = sizes_t[0], sizes_t[-1]
+        s_lo, s_hi = _BALL_MIN, float(st.session_state.get("ball_max", 60))
         mapped = pd.to_numeric(raw, errors="coerce")
-        if size_scale == "Log":
-            pos = mapped.dropna()
-            pos = pos[pos > 0]
-            if len(pos):
-                logv = pos.map(lambda v: math.log10(float(v)))
-                anchors = [float(logv.quantile(q)) for q in _BALL_QS]
-                sizes = mapped.map(lambda v: _ball_size(v, anchors, sizes_t))
-            else:
-                sizes = pd.Series([8] * len(visible), index=visible.index)
-        elif size_scale == "Log²":
-            pos = mapped.dropna()
-            pos = pos[pos > 1]
-            if len(pos):
-                dlog = pos.map(lambda v: math.log10(math.log10(float(v))))
-                lo, hi = float(dlog.min()), float(dlog.max())
-                if hi <= lo:
-                    hi = lo + 1.0
-                span = (hi - lo) or 1.0
+        good = mapped.dropna()
+        good = good[good > 0] if size_scale in ("Log", "Logᵖ") else good
+        if len(good):
+            vmax = float(good.max())
+            if size_scale == "Log":
+                fmax = math.log10(max(vmax, 1.0))
 
-                def _dsize(v):
-                    if v is None or v != v:
-                        return 8.0
-                    if v <= 1:
-                        return s_lo
-                    d = math.log10(math.log10(float(v)))
-                    if d <= lo:
-                        return s_lo
-                    if d >= hi:
-                        return s_hi
-                    return s_lo + (s_hi - s_lo) * (d - lo) / span
+                def ratio(v):
+                    return math.log10(max(float(v), 1.0)) / fmax
+            elif size_scale == "Logᵖ":
+                p = float(st.session_state.get("log_exp", 1.0))
+                fmax = math.log10(max(vmax, 1.0))
 
-                sizes = mapped.map(_dsize)
+                def ratio(v):
+                    return (math.log10(max(float(v), 1.0)) / fmax) ** p
             else:
-                sizes = pd.Series([8] * len(visible), index=visible.index)
+                def ratio(v):
+                    return float(v) / vmax if vmax > 0 else 0.0
+
+            sizes = mapped.map(
+                lambda v: min(s_hi, max(s_lo, s_hi * ratio(v))) if v == v and v > 0 else s_lo
+            )
         else:
-            good = mapped.dropna()
-            if len(good):
-                lo, hi = float(good.min()), float(good.max())
-                if hi <= lo:
-                    hi = lo + 1.0
-                span = (hi - lo) or 1.0
-                sizes = mapped.map(
-                    lambda v: s_lo + (s_hi - s_lo) * (v - lo) / span if v == v else 8
-                )
-            else:
-                sizes = pd.Series([8] * len(visible), index=visible.index)
+            sizes = pd.Series([8] * len(visible), index=visible.index)
 
     print(f"[ball-size] {size_label} · scale={size_scale} · min={float(sizes.min()):.1f}px "
           f"max={float(sizes.max()):.1f}px · distinct={int(sizes.nunique())}", flush=True)
@@ -600,7 +667,8 @@ def main():
             fig.add_trace(build_value_field(visible, x_axis, y_axis, z_axis, log_x,
                                             w_cost, w_speed, w_intel, cb,
                                             steps=field_res, opacity=field_opacity,
-                                            surfaces=surfs))
+                                            surfaces=surfs, curve=field_curve,
+                                            density=st.session_state.get("field_density", 50) / 100.0))
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac),
                           selector=dict(type="scatter3d"))
         if len(hl_names):
