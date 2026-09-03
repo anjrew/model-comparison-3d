@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import re
 
 import numpy as np
 import streamlit as st
@@ -473,9 +474,27 @@ def main():
 
         with st.expander("⭐ Highlight", expanded=False):
             hl_search = st.text_input("Search model to highlight", key="hl_search")
-            hl_opts = [n for n in sorted(df["name"].unique()) if hl_search.lower() in n.lower()]
+            all_names = sorted(df["name"].unique())
+
+            def _hl_norm(s):
+                return re.sub(r"[^a-z0-9]+", "", s.lower())
+
+            q = hl_search.strip().lower()
+            if q:
+                tokens = [_hl_norm(t) for t in q.split()]
+                tokens = [t for t in tokens if t]
+                if tokens:
+                    norms = {n: _hl_norm(n) for n in all_names}
+                    hl_opts = [n for n in all_names if all(t in norms[n] for t in tokens)]
+                else:
+                    hl_opts = []
+            else:
+                hl_opts = all_names
             hl_names = st.multiselect("Models to highlight", hl_opts, max_selections=10, key="hl_names")
-            st.caption("Highlighted models render as large gold markers.")
+            st.caption(
+                f"{len(hl_opts):,} matching · large gold markers" if q
+                else "Type to search · highlighted render as large gold markers"
+            )
 
         with st.expander("➕ Custom models", expanded=False):
             with st.form("add_model", clear_on_submit=True):
@@ -645,6 +664,16 @@ def main():
     hdata["Ball size (px)"] = sizes.map(lambda v: _hnum(v, "{:.0f}"))
     hover_data = {c: True for c in hover_cols}
 
+    def _hl_hover(hdf, dims):
+        cols = ["name"] + hover_cols
+        cdata = hdf[cols].to_numpy()
+        lines = ["<b>%{customdata[0]}</b>"]
+        for i, c in enumerate(hover_cols, start=1):
+            lines.append(f"{c}: %{{customdata[{i}]}}")
+        for ch, ax in dims:
+            lines.append(f"{AXES[ax]}: %{{{ch}}}")
+        return "<br>".join(lines) + "<extra>Highlighted</extra>", cdata
+
     use_continuous = color_mode == "Value score"
     hl_mask = visible["name"].isin(hl_names) if hl_names else pd.Series(False, index=visible.index)
     base_opac = 0.18 if len(hl_names) else 0.45
@@ -673,14 +702,15 @@ def main():
                           selector=dict(type="scatter3d"))
         if len(hl_names):
             hdf = visible[hl_mask]
+            htemplate, hcustom = _hl_hover(hdata[hl_mask], (("x", x_axis), ("y", y_axis), ("z", z_axis)))
             fig.add_trace(go.Scatter3d(
                 x=hdf[x_axis], y=hdf[y_axis], z=hdf[z_axis],
                 mode="markers",
                 name=f"Highlighted ({len(hdf)})",
                 marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=260), color="#FFD700",
                             opacity=1.0, line=dict(width=2, color="#000000")),
-                hovertemplate="%{customdata}<extra>Highlighted</extra>",
-                customdata=hdf["name"],
+                hovertemplate=htemplate,
+                customdata=hcustom,
             ))
         fig.update_layout(scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis], zaxis_title=AXES[z_axis]),
                           height=750, margin=dict(l=0, r=0, t=30, b=0))
@@ -703,14 +733,15 @@ def main():
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac))
         if len(hl_names):
             hdf = visible[hl_mask]
+            htemplate, hcustom = _hl_hover(hdata[hl_mask], (("x", x_axis), ("y", y_axis)))
             fig.add_trace(go.Scatter(
                 x=hdf[x_axis], y=hdf[y_axis],
                 mode="markers",
                 name=f"Highlighted ({len(hdf)})",
                 marker=dict(size=(sizes[hl_mask] * 1.6 + 4).clip(upper=260), color="#FFD700",
                             opacity=1.0, line=dict(width=2, color="#000000")),
-                hovertemplate="%{customdata}<extra>Highlighted</extra>",
-                customdata=hdf["name"],
+                hovertemplate=htemplate,
+                customdata=hcustom,
             ))
         fig.update_layout(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
                           height=750, margin=dict(l=0, r=0, t=30, b=0))
