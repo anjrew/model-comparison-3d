@@ -27,7 +27,7 @@ Every model's **Intelligence (1–10)** comes from one of two places. The app te
 
 Highlighted in **four places**:
 
-- **Chart markers** — a live model gets a thin **black ring** around its ball; estimated models render plain.
+- **Chart markers** — a live model gets a thin **cyan outline** around its ball; estimated models render plain.
 - **Hover tooltip** — every ball's hover box shows a **Score source** field (`Live (AA)` / `Estimated (heuristic)` / `User-defined`).
 - **Table** — a **Score source** column sits right after *name*: green = live (AA), amber = estimated heuristic, grey = user-defined. A color legend sits under the table.
 - **Sidebar** — counts of `live (AA) · estimated (heuristic) · user-defined` update as filters change; without a key it says all scores are estimated.
@@ -63,7 +63,7 @@ Makes speed & intelligence live instead of estimated. Free tier: 100 requests/da
 - **Color by** — `Value score` (green = cheap + smart + fast, red = expensive + dumb + slow) or `Provider`
 - **Ball size** — parameters, z-axis value, or uniform
 - **Chart type** — Auto picks 3D when WebGL works, otherwise falls back to 2D
-- **Filters** — search, provider, reasoning-only, open-weights, min context
+- **Filters** — search, provider, score source (live / estimated / user-defined), reasoning-only, open-weights, min context
 - **Axes** — swap cost/speed/intelligence/context, log-scale cost
 
 ## Things worth knowing

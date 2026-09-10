@@ -49,7 +49,7 @@ STATE_KEYS = [
     "x_axis", "y_axis", "z_axis",
     "w_cost", "w_speed", "w_intel",
     "search", "show_all", "prov_search", "sel_providers",
-    "reasoning_only", "open_weights", "min_context", "max_context",
+    "reasoning_only", "open_weights", "sel_sources", "min_context", "max_context",
     "sel_continents", "sel_countries",
     "hl_search", "hl_names", "table_search",
 ] + [f"rng_{m}_{b}" for m in AXES for b in ("min", "max")]
@@ -117,29 +117,18 @@ def _cell_style(v):
     return _SRC_STYLE.get(v, "")
 
 
-def _add_live_ring(fig, three_d, x_axis, y_axis, z_axis, visible, sizes, ring_mask):
-    if not ring_mask.any():
-        return
-    ridx = visible.index[ring_mask]
-    size = (sizes[ring_mask] * 1.18 + 3).clip(upper=300)
-    if three_d:
-        fig.add_trace(go.Scatter3d(
-            x=visible.loc[ridx, x_axis], y=visible.loc[ridx, y_axis], z=visible.loc[ridx, z_axis],
-            mode="markers",
-            name=f"Live (AA) · {int(ring_mask.sum()):,}",
-            marker=dict(size=size, color="rgba(255,255,255,0)",
-                        line=dict(color="#111111", width=2)),
-            hoverinfo="skip",
-        ))
-    else:
-        fig.add_trace(go.Scatter(
-            x=visible.loc[ridx, x_axis], y=visible.loc[ridx, y_axis],
-            mode="markers",
-            name=f"Live (AA) · {int(ring_mask.sum()):,}",
-            marker=dict(size=size, color="rgba(255,255,255,0)",
-                        line=dict(color="#111111", width=2)),
-            hoverinfo="skip",
-        ))
+_LIVE_OUTLINE_COLOR = "#22d3ee"
+
+
+def _apply_live_outline(fig, color=_LIVE_OUTLINE_COLOR, width=2.5):
+    for tr in fig.data:
+        if tr.type not in ("scatter", "scatter3d") or tr.customdata is None:
+            continue
+        flags = [bool(row[0]) for row in tr.customdata]
+        if not any(flags):
+            continue
+        tr.marker.line.color = [color if f else "rgba(0,0,0,0)" for f in flags]
+        tr.marker.line.width = width
 
 
 def _cost_transform(c, log_cost):
@@ -510,6 +499,14 @@ def main():
 
             reasoning_only = st.checkbox("Reasoning models only", value=False, key="reasoning_only")
             open_weights = st.checkbox("Open-weights only", value=False, key="open_weights")
+            sel_sources = st.multiselect(
+                "Score source",
+                ["Live (AA)", "Estimated (heuristic)", "User-defined"],
+                key="sel_sources",
+                help="Where intelligence/speed come from. Empty = show all. "
+                     "Live = measured by Artificial Analysis; Estimated = local heuristic; "
+                     "User-defined = numbers you typed in yourself.",
+            )
             st.caption("Context length (K tokens)")
             ctx_c1, ctx_c2 = st.columns(2)
             with ctx_c1:
@@ -621,6 +618,8 @@ def main():
         visible = visible[visible["reasoning"]]
     if open_weights:
         visible = visible[visible["open_weights"]]
+    if sel_sources:
+        visible = visible[_score_source(visible).isin(sel_sources)]
     if min_context:
         visible = visible[visible["context"] >= min_context * 1000]
     if max_context:
@@ -709,6 +708,7 @@ def main():
 
     hdata = visible.copy()
     hdata["_bsize"] = sizes
+    hdata["_ring"] = ring_mask
     hdata["Provider"] = hdata["provider"].fillna("n/a")
     hdata["Cost ($/1M in)"] = hdata["cost"].map(lambda v: _hnum(v, "{:.2f}"))
     hdata["Speed (1-10)"] = hdata["speed"].map(lambda v: _hnum(v, "{:.1f}"))
@@ -743,13 +743,13 @@ def main():
                                 range_color=value_range,
                                 size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
-                                text=None, title=None)
+                                custom_data=["_ring"], text=None, title=None)
         else:
             fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="provider", color_discrete_map=color_map,
                                 size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
-                                text=None, title=None)
+                                custom_data=["_ring"], text=None, title=None)
         if show_field and len(visible) >= 4:
             surfs = _adaptive_surfaces(visible, df, x_axis, y_axis, z_axis, log_x, field_surfaces)
             fig.add_trace(build_value_field(visible, x_axis, y_axis, z_axis, log_x,
@@ -759,7 +759,7 @@ def main():
                                             density=st.session_state.get("field_density", 50) / 100.0))
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac),
                           selector=dict(type="scatter3d"))
-        _add_live_ring(fig, True, x_axis, y_axis, z_axis, visible, sizes, ring_mask)
+        _apply_live_outline(fig)
         if len(hl_names):
             hdf = visible[hl_mask]
             htemplate, hcustom = _hl_hover(hdata[hl_mask], (("x", x_axis), ("y", y_axis), ("z", z_axis)))
@@ -785,13 +785,15 @@ def main():
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="value",
                              color_continuous_scale=VALUE_SCALE, range_color=value_range,
                              size="_bsize", size_max=200,
-                             hover_name="name", hover_data=hover_data, title=None)
+                             hover_name="name", hover_data=hover_data,
+                             custom_data=["_ring"], title=None)
         else:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                              size="_bsize", size_max=200,
-                             hover_name="name", hover_data=hover_data, title=None)
+                             hover_name="name", hover_data=hover_data,
+                             custom_data=["_ring"], title=None)
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac))
-        _add_live_ring(fig, False, x_axis, y_axis, z_axis, visible, sizes, ring_mask)
+        _apply_live_outline(fig)
         if len(hl_names):
             hdf = visible[hl_mask]
             htemplate, hcustom = _hl_hover(hdata[hl_mask], (("x", x_axis), ("y", y_axis)))
@@ -820,7 +822,7 @@ def main():
     st.plotly_chart(fig, use_container_width=True)
     st.caption(f"Ball size: {size_label} · {float(sizes.min()):.0f}–{float(sizes.max()):.0f} px · {int(sizes.nunique()):,} distinct")
     if ring_mask.any():
-        st.caption(f"Balls with a black ring = intelligence & speed measured by Artificial Analysis ({int(ring_mask.sum()):,}); un-ringed = heuristic estimates.")
+        st.caption(f"Balls with a cyan outline = intelligence & speed measured by Artificial Analysis ({int(ring_mask.sum()):,}); plain balls = heuristic estimates.")
     if chart_type == "3D (WebGL)" and show_field and len(visible) >= 4:
         st.caption(f"Field surfaces: {surfs} (adapted from {field_surfaces} to the current axis ranges)")
 
