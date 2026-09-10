@@ -234,6 +234,7 @@ def apply_scores(models, aa=None):
     out = []
     for m in models:
         row = dict(m)
+        preset = bool(row.get("scores_live"))
         live = False
         intelligence = row.get("intelligence")
         speed = row.get("speed")
@@ -250,7 +251,7 @@ def apply_scores(models, aa=None):
             speed = estimate_speed(m)
         row["intelligence"] = intelligence
         row["speed"] = speed
-        row["scores_live"] = live
+        row["scores_live"] = live or preset
         if row.get("params") is None:
             row["params"] = guess_params(intelligence)
             row["params_est"] = True

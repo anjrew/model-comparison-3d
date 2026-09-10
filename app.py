@@ -96,6 +96,51 @@ VALUE_SCALE = [
 
 _BALL_MIN = 5.0
 
+_SRC_STYLE = {
+    "Live (AA)": "background-color:#d8f3dc;color:#14532d",
+    "User-defined": "background-color:#e7e5e4;color:#44403c",
+    "Estimated (heuristic)": "background-color:#fef3c7;color:#92400e",
+}
+
+
+def _score_source(df):
+    has_aa = df.get("aa_intelligence_index")
+    live_aa = (df["scores_live"] & has_aa.notna()) if has_aa is not None else pd.Series(False, index=df.index)
+    return pd.Series(
+        np.where(df["scores_live"] & ~live_aa, "User-defined",
+                 np.where(live_aa, "Live (AA)", "Estimated (heuristic)")),
+        index=df.index,
+    )
+
+
+def _cell_style(v):
+    return _SRC_STYLE.get(v, "")
+
+
+def _add_live_ring(fig, three_d, x_axis, y_axis, z_axis, visible, sizes, ring_mask):
+    if not ring_mask.any():
+        return
+    ridx = visible.index[ring_mask]
+    size = (sizes[ring_mask] * 1.18 + 3).clip(upper=300)
+    if three_d:
+        fig.add_trace(go.Scatter3d(
+            x=visible.loc[ridx, x_axis], y=visible.loc[ridx, y_axis], z=visible.loc[ridx, z_axis],
+            mode="markers",
+            name=f"Live (AA) · {int(ring_mask.sum()):,}",
+            marker=dict(size=size, color="rgba(255,255,255,0)",
+                        line=dict(color="#111111", width=2)),
+            hoverinfo="skip",
+        ))
+    else:
+        fig.add_trace(go.Scatter(
+            x=visible.loc[ridx, x_axis], y=visible.loc[ridx, y_axis],
+            mode="markers",
+            name=f"Live (AA) · {int(ring_mask.sum()):,}",
+            marker=dict(size=size, color="rgba(255,255,255,0)",
+                        line=dict(color="#111111", width=2)),
+            hoverinfo="skip",
+        ))
+
 
 def _cost_transform(c, log_cost):
     return math.log10(max(c, 1e-6)) if log_cost else c
@@ -364,10 +409,20 @@ def main():
     )
     df = df.loc[~no_ctx].reset_index(drop=True)
 
+    src = _score_source(df)
+    n_live_aa = int((src == "Live (AA)").sum())
+    n_est = int((src == "Estimated (heuristic)").sum())
+    n_user = int((src == "User-defined").sum())
+
     with st.sidebar:
-        live = sum(1 for m in scored if m["scores_live"])
         st.caption(f"{len(df):,} models · {df['provider'].nunique():,} providers")
-        st.caption(f"{live:,} live AA scores" if live else "AA key optional (live speed/intelligence)")
+        if n_live_aa == 0 and n_user == 0:
+            st.caption("All scores estimated (heuristic) — add an AA API key for live intelligence/speed")
+        elif n_live_aa == 0:
+            st.caption(f"{n_est:,} estimated (heuristic) + {n_user:,} user-defined — add an AA API key for live data")
+        else:
+            extra = f" · {n_user:,} user-defined" if n_user else ""
+            st.caption(f"{n_live_aa:,} live (AA) · {n_est:,} estimated (heuristic){extra}")
 
         with st.expander("📈 Chart", expanded=True):
             chart_mode = st.radio(
@@ -463,7 +518,7 @@ def main():
                 max_context = st.number_input("Max", min_value=0, step=16, value=0, key="max_context")
 
             st.caption("Origin")
-            continent_opts = sorted(df["continent"].unique())
+            continent_opts = sorted([c for c in df["continent"].dropna().unique()])
             country_opts = sorted([c for c in df["country"].dropna().unique()])
             sel_continents = st.multiselect("Continent", continent_opts, key="sel_continents")
             sel_countries = st.multiselect("Country", country_opts, key="sel_countries")
@@ -581,6 +636,9 @@ def main():
         _save_state()
         return
 
+    src = _score_source(visible)
+    ring_mask = (src == "Live (AA)").to_numpy()
+
     st.title("📊 3D LLM Model Comparison")
     st.caption(f"{len(visible):,} models shown. Hover for details; drag to rotate.")
     if len(unrendered):
@@ -642,7 +700,7 @@ def main():
     print(f"[ball-size] {size_label} · scale={size_scale} · min={float(sizes.min()):.1f}px "
           f"max={float(sizes.max()):.1f}px · distinct={int(sizes.nunique())}", flush=True)
 
-    hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)",
+    hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)", "Score source",
                   "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s",
                   "Ball size (px)"]
 
@@ -655,6 +713,7 @@ def main():
     hdata["Cost ($/1M in)"] = hdata["cost"].map(lambda v: _hnum(v, "{:.2f}"))
     hdata["Speed (1-10)"] = hdata["speed"].map(lambda v: _hnum(v, "{:.1f}"))
     hdata["Intelligence (1-10)"] = hdata["intelligence"].map(lambda v: _hnum(v, "{:.1f}"))
+    hdata["Score source"] = src.to_numpy()
     hdata["Context"] = hdata["context"].map(lambda v: _hnum(v, "{:,.0f}"))
     hdata["Params (B)"] = hdata["params"].map(lambda v: _hnum(v, "{:.1f}"))
     hdata["Country"] = hdata["country"].fillna("n/a")
@@ -700,6 +759,7 @@ def main():
                                             density=st.session_state.get("field_density", 50) / 100.0))
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac),
                           selector=dict(type="scatter3d"))
+        _add_live_ring(fig, True, x_axis, y_axis, z_axis, visible, sizes, ring_mask)
         if len(hl_names):
             hdf = visible[hl_mask]
             htemplate, hcustom = _hl_hover(hdata[hl_mask], (("x", x_axis), ("y", y_axis), ("z", z_axis)))
@@ -731,6 +791,7 @@ def main():
                              size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data, title=None)
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac))
+        _add_live_ring(fig, False, x_axis, y_axis, z_axis, visible, sizes, ring_mask)
         if len(hl_names):
             hdf = visible[hl_mask]
             htemplate, hcustom = _hl_hover(hdata[hl_mask], (("x", x_axis), ("y", y_axis)))
@@ -758,17 +819,25 @@ def main():
 
     st.plotly_chart(fig, use_container_width=True)
     st.caption(f"Ball size: {size_label} · {float(sizes.min()):.0f}–{float(sizes.max()):.0f} px · {int(sizes.nunique()):,} distinct")
+    if ring_mask.any():
+        st.caption(f"Balls with a black ring = intelligence & speed measured by Artificial Analysis ({int(ring_mask.sum()):,}); un-ringed = heuristic estimates.")
     if chart_type == "3D (WebGL)" and show_field and len(visible) >= 4:
         st.caption(f"Field surfaces: {surfs} (adapted from {field_surfaces} to the current axis ranges)")
 
     st.subheader("Table")
     table_search = st.text_input("Search table (matches any column)", key="table_search")
-    tbl = visible
+    tbl = visible.copy()
+    tbl["Score source"] = src.reindex(tbl.index).to_numpy()
+    _cols = list(visible.columns)
+    _pos = _cols.index("name")
+    _cols.insert(_pos + 1, "Score source")
+    tbl = tbl[_cols]
     if table_search:
         mask = tbl.astype(str).apply(lambda col: col.str.contains(table_search, case=False, na=False)).any(axis=1)
         tbl = tbl[mask]
-    st.dataframe(tbl, width="stretch", hide_index=True)
-    st.caption(f"Showing {len(tbl):,} of {len(visible):,} filtered models.")
+    st.dataframe(tbl.style.map(_cell_style, subset=["Score source"]), width="stretch", hide_index=True)
+    st.caption(f"Showing {len(tbl):,} of {len(visible):,} filtered models. "
+               "Score source colors: green = live (Artificial Analysis), amber = heuristic estimate, grey = user-defined.")
 
     if len(unrendered):
         st.markdown('<a id="excluded-models"></a>', unsafe_allow_html=True)
