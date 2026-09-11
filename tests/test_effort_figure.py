@@ -82,6 +82,31 @@ class TestEffortFigure(unittest.TestCase):
         fig = app.build_effort_figure(per_model, pts, sizes, cfg, "Provider", True)
         self.assertEqual(fig.data[0].type, "scatter")
 
+    def test_value_field_added_when_enabled(self):
+        per_model, pts, sizes = _fixture()
+        visible = pd.DataFrame({
+            "cost": [1.0, 2.0, 3.0, 4.0],
+            "speed": [5.0, 6.0, 7.0, 8.0],
+            "intelligence": [4.0, 5.0, 6.0, 7.0],
+            "context": [32000, 64000, 128000, 200000],
+        })
+        cfg = dict(BASE_CFG, show_field=True, cb=app._compute_bounds(visible, True),
+                   full_df=visible, curve=1.0, w_cost=33, w_speed=33, w_intel=34,
+                   field_surfaces=8, field_res=6, field_opacity=0.14, field_density=0.5)
+        fig = app.build_effort_figure(per_model, pts, sizes, cfg, "Effort level", True,
+                                      visible_df=visible)
+        self.assertIn("volume", [t.type for t in fig.data])
+
+    def test_no_field_when_disabled(self):
+        per_model, pts, sizes = _fixture()
+        visible = pd.DataFrame({
+            "cost": [1.0, 2.0, 3.0, 4.0], "speed": [5.0, 6.0, 7.0, 8.0],
+            "intelligence": [4.0, 5.0, 6.0, 7.0], "context": [32000, 64000, 128000, 200000],
+        })
+        fig = app.build_effort_figure(per_model, pts, sizes, BASE_CFG, "Effort level", True,
+                                      visible_df=visible)
+        self.assertNotIn("volume", [t.type for t in fig.data])
+
     def test_axes_follow_configuration(self):
         per_model, pts, sizes = _fixture()
         cfg = dict(BASE_CFG, x_axis="intelligence", y_axis="cost", z_axis="speed")

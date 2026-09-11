@@ -332,7 +332,7 @@ def _color_chips(items):
     return " ".join(spans)
 
 
-def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
+def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x, visible_df=None):
     """3D (or 2D fallback) effort ladders: nodes per level, edges between levels."""
     x_axis, y_axis, z_axis = cfg["x_axis"], cfg["y_axis"], cfg["z_axis"]
     is_3d = cfg["chart_type"] == "3D (WebGL)"
@@ -397,6 +397,17 @@ def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
             else:
                 fig.add_trace(go.Scatter(**edge_kwargs))
     use_log = log_x and x_axis == "cost" and bool((pts["cost"] > 0).all())
+    add_field = (is_3d and cfg.get("show_field") and cfg.get("cb") is not None
+                 and visible_df is not None and len(visible_df) >= 4)
+    if add_field:
+        surfs = _adaptive_surfaces(visible_df, cfg.get("full_df", visible_df), x_axis, y_axis,
+                                   z_axis, log_x, cfg["field_surfaces"])
+        fig.add_trace(build_value_field(
+            visible_df, x_axis, y_axis, z_axis, log_x,
+            cfg["w_cost"], cfg["w_speed"], cfg["w_intel"], cfg["cb"],
+            steps=cfg["field_res"], opacity=cfg["field_opacity"], surfaces=surfs,
+            curve=cfg["curve"], density=cfg["field_density"],
+        ))
     if is_3d:
         fig.update_layout(height=680, margin=dict(l=0, r=0, t=30, b=0),
                           scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
@@ -408,6 +419,13 @@ def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
                           legend_title="Model")
         if use_log:
             fig.update_xaxes(type="log")
+    if add_field:
+        range_df = pd.concat(
+            [visible_df[["cost", "speed", "intelligence", "context"]],
+             pts[["cost", "speed", "intelligence", "context"]]],
+            ignore_index=True,
+        )
+        _apply_axis_ranges(fig, cfg["chart_type"], x_axis, y_axis, z_axis, log_x, range_df)
     return fig
 
 
@@ -475,7 +493,7 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve, cf
     else:
         sizes = _ball_sizes(raw, cfg["size_scale"], cfg["ball_max"], cfg["log_exp"])
 
-    fig = build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x)
+    fig = build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x, visible_df=df)
     st.plotly_chart(fig, use_container_width=True)
     levels_present = [e for e in EFFORT_ORDER if e in set(pts["effort"])]
     if color_by == "Effort level":
@@ -1238,6 +1256,12 @@ def main():
             "chart_type": chart_type, "ball_size": ball_size, "size_scale": size_scale,
             "ball_max": st.session_state.get("ball_max", 60),
             "log_exp": st.session_state.get("log_exp", 1.0),
+            "show_field": show_field, "cb": cb, "full_df": df, "curve": field_curve,
+            "w_cost": w_cost, "w_speed": w_speed, "w_intel": w_intel,
+            "field_surfaces": st.session_state.get("field_surfaces", 22),
+            "field_res": st.session_state.get("field_res", 14),
+            "field_opacity": st.session_state.get("field_opacity", 14) / 100.0,
+            "field_density": st.session_state.get("field_density", 50) / 100.0,
         },
     )
 
