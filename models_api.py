@@ -273,41 +273,85 @@ def build_aa_index(aa):
                 exact.setdefault(sn, key)
             if nn:
                 exact.setdefault(nn, key)
-            entries.append((sn, nn, key))
+            entries.append((sn, key))
     return groups, exact, entries
 
 
+def _fuzzy_hit(target, entries, guarded=False):
+    best_key, best_score = None, -1
+    for sn, k in entries:
+        if len(sn) < 5:
+            continue
+        if sn in target:
+            score = len(sn)
+        elif len(target) >= 5 and target in sn:
+            if guarded:
+                lo, hi = sorted((len(sn), len(target)))
+                if hi - lo > max(4, 0.25 * hi):
+                    continue
+            score = len(target)
+        else:
+            continue
+        if score > best_score:
+            best_score = score
+            best_key = k
+    return best_key, best_score
+
+
+def _best_match(target, groups, exact, entries, guarded=False):
+    key = exact.get(target)
+    if key:
+        return groups[key], 1_000_000 + len(target)
+    k, score = _fuzzy_hit(target, entries, guarded)
+    return (groups[k], score) if k else (None, -1)
+
+
 def match_aa_ladder(model, aa=None, index=None):
-    target = _norm(model["id"].rsplit("/", 1)[-1]) or _norm(model.get("name") or "")
-    if not target:
-        return []
     if index is None:
         index = build_aa_index(aa)
     groups, exact, entries = index
-    key = exact.get(target)
-    if key:
-        return groups[key]
-    best_key, best_score = None, -1
-    for sn, nn, k in entries:
-        for cand in (sn, nn):
-            if len(cand) >= 5 and (cand in target or target in cand) and len(cand) > best_score:
-                best_score = len(cand)
-                best_key = k
-    return groups.get(best_key, []) if best_key else []
+    targets = ((_norm(model["id"].rsplit("/", 1)[-1]), False),
+               (_norm(model.get("name") or ""), True))
+    best, best_q = [], -1
+    for target, guarded in targets:
+        if not target:
+            continue
+        hit, q = _best_match(target, groups, exact, entries, guarded)
+        if hit and q > best_q:
+            best, best_q = hit, q
+    return best
+
+
+def _name_match_quality(target, sn, nn):
+    best = -1
+    for cand in (sn, nn):
+        if not cand:
+            continue
+        if cand == target:
+            return 1_000_000 + len(cand)
+        if len(cand) < 5:
+            continue
+        if cand in target:
+            best = max(best, len(cand))
+        elif len(target) >= 5 and target in cand:
+            best = max(best, len(target))
+    return best
+
+
+def _variant_score(target, rec):
+    return _name_match_quality(target, _norm(rec.get("slug") or ""),
+                               _norm(rec.get("name") or ""))
 
 
 def _pick_default_variant(model, ladder):
     if not ladder:
         return None
-    target = _norm(model["id"].rsplit("/", 1)[-1])
-    for rec in ladder:
-        if _norm(rec.get("slug") or "") == target:
-            return rec
-    for rec in ladder:
-        if rec.get("effort") is None:
-            return rec
-    measured = [r for r in ladder if r.get("intelligence_index") is not None]
-    return max(measured, key=lambda r: r["intelligence_index"]) if measured else ladder[0]
+    targets = [t for t in (_norm(model["id"].rsplit("/", 1)[-1]),
+                            _norm(model.get("name") or "")) if t]
+    for target in targets:
+        if any(_variant_score(target, r) >= 0 for r in ladder):
+            return max(ladder, key=lambda r: _variant_score(target, r))
+    return ladder[0]
 
 
 def fetch_aa(key):

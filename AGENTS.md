@@ -31,10 +31,16 @@ Rules:
 ```bash
 .venv/bin/streamlit run app.py        # start the app (http://localhost:8501)
 .venv/bin/python -c "import ast; ast.parse(open('app.py').read())"   # syntax check
+.venv/bin/python -m unittest discover -s tests -v   # tests (incl. provider-consistency)
 ```
 
 Before committing, restart the app and confirm it serves HTTP 200:
 `curl -s -o /dev/null -w "%{http_code}" http://localhost:8501`
+
+The test suite includes a hermetic matching-consistency check plus a real-data
+check (skipped when the local catalog/AA cache is missing or stale) asserting
+that the same model offered by different providers lands within a small
+intelligence/speed spread.
 
 ## Notes
 
