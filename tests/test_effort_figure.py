@@ -37,6 +37,30 @@ BASE_CFG = {
 }
 
 
+class TestEffortCostScale(unittest.TestCase):
+    """Effort cost must stay on the app's $/1M-input scale, near the model."""
+
+    ROW = {"cost": 10.0, "cost_out": 50.0}
+
+    def test_cheapest_level_equals_input_price(self):
+        self.assertAlmostEqual(app._effort_cost_est(self.ROW, "off", "off"), 10.0)
+
+    def test_higher_effort_costs_more(self):
+        self.assertGreater(app._effort_cost_est(self.ROW, "max", "off"), 10.0)
+
+    def test_uses_measured_ratios_when_available(self):
+        ratios = {"low": 1.0, "max": 3.98}
+        self.assertAlmostEqual(app._effort_cost_est(self.ROW, "low", "off", ratios), 10.0)
+        self.assertAlmostEqual(app._effort_cost_est(self.ROW, "max", "off", ratios), 39.8)
+
+    def test_output_price_does_not_dominate(self):
+        # the old model added output_price*mult, sending a $10 model to $400+
+        self.assertLess(app._effort_cost_est(self.ROW, "max", "off"), 10.0 * 10)
+
+    def test_zero_input_price_is_still_positive(self):
+        self.assertGreater(app._effort_cost_est({"cost": 0.0}, "high", "off"), 0.0)
+
+
 class TestEffortFigure(unittest.TestCase):
     def test_nodes_and_edges_traces(self):
         per_model, pts, sizes = _fixture()

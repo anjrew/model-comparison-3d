@@ -179,18 +179,21 @@ def _effort_ordered(levels):
     return sorted({e for e in (levels or []) if e in EFFORT_RANK}, key=EFFORT_RANK.get)
 
 
-def _effort_cost_est(row, level, ref):
+def _effort_cost_est(row, level, ref, ratios=None):
+    """Effective cost on the app's $/1M-input scale.
+
+    Anchored to the model's input price and scaled by the effort multiplier (or
+    by observed AA cost ratios when available), so effort nodes stay in the same
+    units/region as the main chart instead of adding raw output price.
+    """
     base = float(row.get("cost") or 0.0)
-    out = row.get("cost_out")
-    try:
-        out = float(out)
-        if out != out:
-            out = base
-    except (TypeError, ValueError):
-        out = base
+    if base <= 0:
+        base = 1e-6
+    if ratios and ratios.get(level):
+        return base * ratios[level]
     mult = EFFORT_COST_MULT.get(level, 1.5)
     ref_mult = EFFORT_COST_MULT.get(ref, 1.0) or 1.0
-    return base + max(out, 0.0) * (mult / ref_mult)
+    return base * (mult / ref_mult)
 
 
 def _measured_levels(row):
@@ -213,7 +216,12 @@ def _effort_ladder_rows(row, w_cost, w_speed, w_intel, log_x, curve=1.0):
     if not levels:
         return [], None
     ref = levels[0]
-    all_measured = all(measured[e].get("cost_per_task") is not None for e in levels)
+    aa_costs = {e: measured[e].get("cost_per_task") for e in levels}
+    have = {e: c for e, c in aa_costs.items() if c and c > 0}
+    ratios = {}
+    if len(have) >= 2:
+        cmin = min(have.values())
+        ratios = {e: c / cmin for e, c in have.items()}
     rows = []
     for e in levels:
         v = measured[e]
@@ -221,13 +229,10 @@ def _effort_ladder_rows(row, w_cost, w_speed, w_intel, log_x, curve=1.0):
         speed = v.get("speed")
         if speed is None:
             speed = row.get("speed")
-        aa_cost = v.get("cost_per_task")
-        if all_measured:
-            cost, cost_src = aa_cost, "Live (AA)"
-        else:
-            cost, cost_src = _effort_cost_est(row, e, ref), "Estimated (effort)"
+        cost = _effort_cost_est(row, e, ref, ratios)
         rows.append({"effort": e, "intelligence": intel, "speed": speed,
-                     "cost": cost, "cost_source": cost_src, "aa_cost": aa_cost})
+                     "cost": cost, "cost_source": "Estimated (effort)",
+                     "aa_cost": aa_costs[e]})
     cost_vals = [_cost_transform(r["cost"], log_x) for r in rows]
     c_lo, c_hi = min(cost_vals), max(cost_vals)
     if c_hi <= c_lo:
@@ -528,7 +533,9 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve, cf
                 })
             st.dataframe(pd.DataFrame(trows), hide_index=True, width="stretch")
     st.caption("★ = best with the current cost/speed/intelligence weights. "
-               "≈ and 'Estimated (effort)' = approximated from output-token scaling, not measured.")
+               "≈ and 'Estimated (effort)' = the model's $/1M input price scaled by effort "
+               "(shaped by AA's measured cost ratios when available), not a measured price. "
+               "The 'AA $/task' column is the raw measured value.")
 
 
 def _metric_axis_range(visible, metric):
