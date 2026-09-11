@@ -40,13 +40,39 @@ Highlighted in **four places**:
 
 Custom models you add yourself are marked **User-defined** (grey) — you typed those numbers, so they're neither measured nor guessed.
 
+## Reasoning effort
+
+Reasoning models can be told *how hard to think* before answering. Levels run
+`off → minimal → low → medium → high → xhigh → max`; higher effort is usually
+smarter but slower and more expensive. The app makes this a first-class dimension:
+
+- **Effort tradeoff panel** — for models where Artificial Analysis measured ≥2
+  effort levels, a point-per-level chart of intelligence vs speed, with the
+  **best level** (★) picked by the current cost/speed/intelligence weight sliders,
+  plus a per-level table.
+- **Main chart variants** — *Show effort variants on chart* expands each measured
+  model into one ball per level; color them *by effort level* to see the ladder.
+- **Filter & metadata** — *Only models with a measured effort ladder* focuses on
+  recommendable models; hover and table show *supported effort levels* and *best effort*.
+
+**Measured vs estimated.** Where Artificial Analysis publishes a per-level cost
+(`intelligence_index_cost`), the panel uses it and labels it **Live (AA)** in green.
+Otherwise the per-level cost is approximated by scaling output tokens with effort
+and shown as **≈$ Estimated (effort)** in amber. Effort-*estimated* numbers are
+always marked with `≈` and the `Estimated (effort)` label — never presented as measured.
+
+> Support info comes from models.dev (`reasoning_options`, incl. `toggle` /
+> `budget_tokens` styles). Recommendations need measured data, so they only appear
+> for AA-covered models; everyone else still shows which levels they support.
+
 ## Data
 
 | Metric | Source | Auth |
 | --- | --- | --- |
-| Catalog, pricing, context | [models.dev](https://models.dev) API | keyless, cached 24h |
+| Catalog, pricing, context, effort support | [models.dev](https://models.dev) API | keyless, cached 24h |
 | Speed & intelligence | [Artificial Analysis](https://artificialanalysis.ai) API | free key (optional) |
 | Speed & intelligence (fallback) | local estimates | — |
+| Per-effort intelligence, speed, cost | Artificial Analysis effort variants | free key (optional) |
 
 Models without published parameter counts get an estimate based on intelligence (shown as such in the table).
 
@@ -63,8 +89,9 @@ Makes speed & intelligence live instead of estimated. Free tier: 100 requests/da
 - **Color by** — `Value score` (green = cheap + smart + fast, red = expensive + dumb + slow) or `Provider`
 - **Ball size** — parameters, z-axis value, or uniform
 - **Chart type** — Auto picks 3D when WebGL works, otherwise falls back to 2D
-- **Filters** — search, provider, score source (live / estimated / user-defined), reasoning-only, open-weights, min context
+- **Filters** — search, provider, score source (live / estimated / user-defined), reasoning-only, open-weights, min context, supported effort levels
 - **Axes** — swap cost/speed/intelligence/context, log-scale cost
+- **Effort** — filter by supported levels, show measured effort ladders, expand variants on the chart
 
 ## Things worth knowing
 

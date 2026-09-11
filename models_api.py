@@ -10,6 +10,14 @@ CACHE_FILE = os.path.join(os.path.expanduser("~"), ".cache", "model_compare_mode
 AA_CACHE_FILE = os.path.join(os.path.expanduser("~"), ".cache", "model_compare_aa.json")
 AA_KEY_FILE = os.path.join(os.path.expanduser("~"), ".config", "model-compare", "aa_key")
 CACHE_TTL = 24 * 60 * 60
+AA_CACHE_VERSION = 2
+
+EFFORT_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
+_EFFORT_ALIASES = {
+    "none": "off", "non-reasoning": "off", "noreasoning": "off", "off": "off",
+    "minimal": "minimal", "low": "low", "medium": "medium",
+    "high": "high", "xhigh": "xhigh", "x-high": "xhigh", "max": "max",
+}
 
 
 def load_aa_key():
@@ -145,6 +153,7 @@ def load_catalog(force=False):
             ctx = (m.get("limit") or {}).get("context")
             name = m.get("name") or mid
             country = infer_country(name, m.get("family"))
+            effort_levels, effort_style = parse_reasoning_options(m)
             models.append({
                 "id": f"{prov_id}/{mid}",
                 "name": name,
@@ -157,6 +166,8 @@ def load_catalog(force=False):
                 "continent": _CONTINENT.get(country, "Other") if country else "Other",
                 "reasoning": bool(m.get("reasoning")),
                 "open_weights": bool(m.get("open_weights")),
+                "effort_levels": effort_levels,
+                "effort_style": effort_style,
                 "release_date": m.get("release_date"),
                 "last_updated": m.get("last_updated"),
             })
@@ -177,11 +188,123 @@ def _speed_to_10(ts):
     return round(max(1.0, min(10.0, v)), 1)
 
 
+def normalize_effort(v):
+    return _EFFORT_ALIASES.get(str(v).strip().lower())
+
+
+def parse_reasoning_options(m):
+    levels, styles = [], set()
+    for o in (m.get("reasoning_options") or []):
+        if not isinstance(o, dict):
+            continue
+        t = o.get("type")
+        if t == "effort":
+            styles.add("effort")
+            for v in (o.get("values") or []):
+                e = normalize_effort(v)
+                if e and e not in levels:
+                    levels.append(e)
+        elif t in ("toggle", "budget_tokens"):
+            styles.add(t)
+    levels.sort(key=lambda e: EFFORT_ORDER.index(e))
+    if "effort" in styles:
+        style = "effort"
+    elif "toggle" in styles and "budget_tokens" in styles:
+        style = "toggle+budget"
+    elif "toggle" in styles:
+        style = "toggle"
+    elif "budget_tokens" in styles:
+        style = "budget_tokens"
+    else:
+        style = "none"
+    return levels, style
+
+
+_AA_EFFORT_TOKENS = [
+    ("non-reasoning", "off"),
+    ("xhigh", "xhigh"),
+    ("minimal", "minimal"),
+    ("low", "low"),
+    ("medium", "medium"),
+    ("high", "high"),
+    ("max", "max"),
+]
+
+
+def parse_aa_effort(name):
+    m = re.search(r"\(([^)]*)\)", name or "")
+    if not m:
+        return None
+    inside = m.group(1).lower()
+    for tok, eff in _AA_EFFORT_TOKENS:
+        if re.search(rf"\b{re.escape(tok)}\b", inside):
+            return eff
+    if "reasoning" in inside:
+        return "reasoning"
+    return None
+
+
+def _aa_base_name(name):
+    n = re.sub(r"\s*\([^)]*\)", "", name or "").strip().lower()
+    return re.sub(r"\s*(non-reasoning|reasoning|thinking)\s*$", "", n).strip()
+
+
+def _aa_groups(aa):
+    groups = {}
+    for rec in aa.values():
+        if not isinstance(rec, dict):
+            continue
+        b = _norm(_aa_base_name(rec.get("name") or rec.get("slug") or ""))
+        if b:
+            groups.setdefault(b, []).append(rec)
+    for recs in groups.values():
+        recs.sort(key=lambda r: (
+            r.get("effort") not in EFFORT_ORDER,
+            EFFORT_ORDER.index(r["effort"]) if r.get("effort") in EFFORT_ORDER else 99,
+        ))
+    return groups
+
+
+def match_aa_ladder(model, aa):
+    target = _norm(model["id"].rsplit("/", 1)[-1]) or _norm(model.get("name") or "")
+    if not target or not aa:
+        return []
+    groups = _aa_groups(aa)
+    best_key, best_score = None, -1
+    for key, recs in groups.items():
+        for rec in recs:
+            sn = _norm(rec.get("slug") or "")
+            nn = _norm(rec.get("name") or "")
+            if sn == target or nn == target:
+                return recs
+            for cand in (sn, nn):
+                if len(cand) >= 5 and (cand in target or target in cand) and len(cand) > best_score:
+                    best_score = len(cand)
+                    best_key = key
+    return groups.get(best_key, []) if best_key else []
+
+
+def _pick_default_variant(model, ladder):
+    if not ladder:
+        return None
+    target = _norm(model["id"].rsplit("/", 1)[-1])
+    for rec in ladder:
+        if _norm(rec.get("slug") or "") == target:
+            return rec
+    for rec in ladder:
+        if rec.get("effort") is None:
+            return rec
+    measured = [r for r in ladder if r.get("intelligence_index") is not None]
+    return max(measured, key=lambda r: r["intelligence_index"]) if measured else ladder[0]
+
+
 def fetch_aa(key):
     if os.path.exists(AA_CACHE_FILE) and time.time() - os.path.getmtime(AA_CACHE_FILE) < CACHE_TTL:
         try:
             with open(AA_CACHE_FILE) as f:
-                return json.load(f)
+                cached = json.load(f)
+            if isinstance(cached, dict) and cached.get("_v") == AA_CACHE_VERSION:
+                return cached["models"]
         except Exception:
             pass
     models = {}
@@ -191,14 +314,24 @@ def fetch_aa(key):
         for r in data.get("data", []):
             evals = r.get("evaluations") or {}
             perf = r.get("performance") or {}
+            pricing = r.get("pricing") or {}
             idx = evals.get("artificial_analysis_intelligence_index")
-            ts = perf.get("median_output_tokens_per_second")
-            if idx is None or ts is None:
+            if idx is None:
                 continue
-            models[(r.get("slug") or "").lower()] = {
+            ts = perf.get("median_output_tokens_per_second")
+            slug = (r.get("slug") or "").lower()
+            cost = r.get("artificial_analysis_intelligence_index_cost") or {}
+            name = r.get("name") or ""
+            models[slug] = {
                 "intelligence_index": idx,
                 "tokens_per_sec": ts,
-                "name": r.get("name") or "",
+                "name": name,
+                "slug": slug,
+                "effort": parse_aa_effort(name),
+                "cost_per_task": (cost.get("cost_per_task") or {}).get("total_cost"),
+                "total_cost": cost.get("total_cost"),
+                "input_price": pricing.get("price_1m_input_tokens"),
+                "output_price": pricing.get("price_1m_output_tokens"),
             }
         pag = data.get("pagination") or {}
         if not pag.get("has_more"):
@@ -206,28 +339,27 @@ def fetch_aa(key):
         page += 1
     try:
         with open(AA_CACHE_FILE, "w") as f:
-            json.dump(models, f)
+            json.dump({"_v": AA_CACHE_VERSION, "models": models}, f)
     except Exception:
         pass
     return models
 
 
-def _match_aa(model, aa):
-    target = _norm(model["id"].rsplit("/", 1)[-1]) or _norm(model.get("name") or "")
-    if not target:
-        return None
-    best_v, best_score = None, -1
-    for slug, v in aa.items():
-        sn = _norm(slug)
-        nn = _norm(v.get("name") or "")
-        if sn and sn == target:
-            return v
-        if nn and nn == target:
-            return v
-        if len(sn) >= 5 and (sn in target or target in sn) and len(sn) > best_score:
-            best_score = len(sn)
-            best_v = v
-    return best_v
+def _ladder_entry(rec):
+    idx = rec.get("intelligence_index")
+    ts = rec.get("tokens_per_sec")
+    return {
+        "effort": rec.get("effort"),
+        "name": rec.get("name"),
+        "slug": rec.get("slug"),
+        "intelligence": _intel_to_10(idx) if idx is not None else None,
+        "speed": _speed_to_10(ts) if ts is not None else None,
+        "aa_intelligence_index": idx,
+        "aa_tokens_per_sec": ts,
+        "cost_per_task": rec.get("cost_per_task"),
+        "input_price": rec.get("input_price"),
+        "output_price": rec.get("output_price"),
+    }
 
 
 def apply_scores(models, aa=None):
@@ -238,16 +370,21 @@ def apply_scores(models, aa=None):
         live = False
         intelligence = row.get("intelligence")
         speed = row.get("speed")
+        ladder = match_aa_ladder(m, aa) if aa else []
+        row["effort_ladder"] = [_ladder_entry(r) for r in ladder]
         if aa:
-            hit = _match_aa(m, aa)
+            hit = _pick_default_variant(m, ladder)
             if hit:
                 intelligence = _intel_to_10(hit["intelligence_index"])
-                speed = _speed_to_10(hit["tokens_per_sec"])
                 row["aa_intelligence_index"] = hit["intelligence_index"]
-                row["aa_tokens_per_sec"] = hit["tokens_per_sec"]
+                row["aa_effort"] = hit.get("effort")
+                if hit.get("tokens_per_sec") is not None:
+                    speed = _speed_to_10(hit["tokens_per_sec"])
+                    row["aa_tokens_per_sec"] = hit["tokens_per_sec"]
                 live = True
         if intelligence is None:
             intelligence = estimate_intelligence(m)
+        if speed is None:
             speed = estimate_speed(m)
         row["intelligence"] = intelligence
         row["speed"] = speed
@@ -257,6 +394,8 @@ def apply_scores(models, aa=None):
             row["params_est"] = True
         else:
             row["params_est"] = False
+        row.setdefault("effort_levels", [])
+        row.setdefault("effort_style", "none")
         out.append(row)
     return out
 
