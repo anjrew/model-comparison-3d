@@ -1,3 +1,4 @@
+import html
 import json
 import math
 import os
@@ -319,19 +320,31 @@ def _ball_sizes(raw, size_scale, ball_max, log_exp):
     )
 
 
+def _color_chips(items):
+    spans = []
+    for label, color in items:
+        spans.append(
+            "<span style='display:inline-flex;align-items:center;margin:0 14px 4px 0'>"
+            f"<span style='width:12px;height:12px;border-radius:3px;background:{color};"
+            "display:inline-block;margin-right:5px;border:1px solid rgba(0,0,0,.25)'></span>"
+            f"<span>{html.escape(str(label))}</span></span>"
+        )
+    return " ".join(spans)
+
+
 def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
-    """3D (or 2D fallback) scatter of effort ladders, matching the main chart."""
+    """3D (or 2D fallback) effort ladders: nodes per level, edges between levels."""
     x_axis, y_axis, z_axis = cfg["x_axis"], cfg["y_axis"], cfg["z_axis"]
     is_3d = cfg["chart_type"] == "3D (WebGL)"
 
-    def axis_vals(rows, row, metric):
+    def axis_val(r, row, metric):
         if metric == "cost":
-            return [r["cost"] for r in rows]
+            return r["cost"]
         if metric == "speed":
-            return [r["speed"] for r in rows]
+            return r["speed"]
         if metric == "intelligence":
-            return [r["intelligence"] for r in rows]
-        return [row["context"]] * len(rows)
+            return r["intelligence"]
+        return row["context"]
 
     fig = go.Figure()
     for name, row, rows, best in per_model:
@@ -341,7 +354,6 @@ def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
         pc = api.provider_color(row["provider"])
         mcolors = ([EFFORT_COLOR_MAP.get(r["effort"], "#94A3B8") for r in pr]
                    if color_by == "Effort level" else pc)
-        line_color = "rgba(148,163,184,0.55)" if color_by == "Effort level" else pc
         cdata = [[r["effort"], _hnum(r["intelligence"], "{:.1f}"), _hnum(r["speed"], "{:.1f}"),
                   _effort_cost_str(r["cost"], r["cost_source"]), r["cost_source"],
                   "n/a" if r["aa_cost"] is None else f"{r['aa_cost']:.3f}",
@@ -352,20 +364,38 @@ def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
                  "<br>AA $/task: %{customdata[5]}<br>Value: %{customdata[6]}<extra></extra>")
         marker = dict(size=psize, color=mcolors, sizemode="diameter", sizeref=1, sizemin=1,
                       line=dict(width=1, color="#111827"))
+        node_kwargs = dict(
+            x=[axis_val(r, row, x_axis) for r in pr],
+            y=[axis_val(r, row, y_axis) for r in pr],
+            mode="markers", name=name, legendgroup=name,
+            marker=marker, customdata=cdata, hovertemplate=hover,
+        )
         if is_3d:
-            fig.add_trace(go.Scatter3d(
-                x=axis_vals(pr, row, x_axis), y=axis_vals(pr, row, y_axis),
-                z=axis_vals(pr, row, z_axis), mode="lines+markers", name=name,
-                line=dict(width=4, color=line_color), marker=marker,
-                customdata=cdata, hovertemplate=hover,
-            ))
+            node_kwargs["z"] = [axis_val(r, row, z_axis) for r in pr]
+            fig.add_trace(go.Scatter3d(**node_kwargs))
         else:
-            fig.add_trace(go.Scatter(
-                x=axis_vals(pr, row, x_axis), y=axis_vals(pr, row, y_axis),
-                mode="lines+markers", name=name,
-                line=dict(width=3, color=line_color), marker=marker,
-                customdata=cdata, hovertemplate=hover,
-            ))
+            fig.add_trace(go.Scatter(**node_kwargs))
+        for a, b in zip(pr, pr[1:]):
+            ecolor = (EFFORT_COLOR_MAP.get(b["effort"], "#94A3B8")
+                      if color_by == "Effort level" else pc)
+            d_i = (b["intelligence"] or 0) - (a["intelligence"] or 0)
+            d_s = (b["speed"] or 0) - (a["speed"] or 0)
+            seg = (f"<b>{name}</b><br>{a['effort']} → {b['effort']}"
+                   f"<br>Δ Intelligence: {d_i:+.1f}<br>Δ Speed: {d_s:+.1f}"
+                   f"<br>Cost: {_effort_cost_str(a['cost'], a['cost_source'])} → "
+                   f"{_effort_cost_str(b['cost'], b['cost_source'])}")
+            edge_kwargs = dict(
+                x=[axis_val(a, row, x_axis), axis_val(b, row, x_axis)],
+                y=[axis_val(a, row, y_axis), axis_val(b, row, y_axis)],
+                mode="lines", showlegend=False, legendgroup=name,
+                line=dict(width=6 if is_3d else 4, color=ecolor),
+                hovertemplate=seg + "<extra></extra>",
+            )
+            if is_3d:
+                edge_kwargs["z"] = [axis_val(a, row, z_axis), axis_val(b, row, z_axis)]
+                fig.add_trace(go.Scatter3d(**edge_kwargs))
+            else:
+                fig.add_trace(go.Scatter(**edge_kwargs))
     use_log = log_x and x_axis == "cost" and bool((pts["cost"] > 0).all())
     if is_3d:
         fig.update_layout(height=680, margin=dict(l=0, r=0, t=30, b=0),
@@ -447,7 +477,18 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve, cf
 
     fig = build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x)
     st.plotly_chart(fig, use_container_width=True)
-    st.caption("Each line connects a model's effort levels (off → max). "
+    levels_present = [e for e in EFFORT_ORDER if e in set(pts["effort"])]
+    if color_by == "Effort level":
+        st.markdown("**Color key — effort level**", unsafe_allow_html=True)
+        st.markdown(_color_chips([(e, EFFORT_COLOR_MAP.get(e, "#94A3B8"))
+                                  for e in levels_present]), unsafe_allow_html=True)
+    else:
+        provs = sorted(pts["provider"].unique())
+        st.markdown("**Color key — provider**", unsafe_allow_html=True)
+        st.markdown(_color_chips([(p, api.provider_color(p)) for p in provs]),
+                    unsafe_allow_html=True)
+    st.caption("Edges connect each model's effort levels (off → max), colored by the level reached; "
+               "hover an edge to see that step's Δintelligence and Δspeed. "
                "Hover a ball for its measured/estimated cost and the weighted value. "
                "≈ and 'Estimated (effort)' mark approximated cost.")
 

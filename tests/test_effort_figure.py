@@ -38,16 +38,28 @@ BASE_CFG = {
 
 
 class TestEffortFigure(unittest.TestCase):
-    def test_3d_lines_one_trace_per_model(self):
+    def test_nodes_and_edges_traces(self):
         per_model, pts, sizes = _fixture()
         fig = app.build_effort_figure(per_model, pts, sizes, BASE_CFG, "Effort level", True)
-        self.assertEqual(len(fig.data), 1)
-        tr = fig.data[0]
-        self.assertEqual(tr.type, "scatter3d")
-        self.assertEqual(tr.mode, "lines+markers")
-        self.assertEqual(len(tr.x), 3)
-        self.assertEqual(len(tr.z), 3)
-        self.assertEqual(tr.name, "Model A")
+        # 1 marker (nodes) trace + 2 edge traces for 3 effort levels
+        self.assertEqual(len(fig.data), 3)
+        nodes = fig.data[0]
+        self.assertEqual(nodes.type, "scatter3d")
+        self.assertEqual(nodes.mode, "markers")
+        self.assertEqual(len(nodes.x), 3)
+        self.assertEqual(len(nodes.z), 3)
+        self.assertEqual(nodes.name, "Model A")
+        edges = [t for t in fig.data if t.mode == "lines"]
+        self.assertEqual(len(edges), 2)
+        self.assertTrue(all(t.type == "scatter3d" for t in edges))
+
+    def test_edge_colors_follow_target_effort(self):
+        per_model, pts, sizes = _fixture()
+        fig = app.build_effort_figure(per_model, pts, sizes, BASE_CFG, "Effort level", True)
+        edges = [t for t in fig.data if t.mode == "lines"]
+        # off->medium then medium->max, each colored by the level reached
+        self.assertEqual(edges[0].line.color, app.EFFORT_COLOR_MAP["medium"])
+        self.assertEqual(edges[1].line.color, app.EFFORT_COLOR_MAP["max"])
 
     def test_points_ordered_by_effort(self):
         per_model, pts, sizes = _fixture()

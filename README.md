@@ -48,10 +48,11 @@ smarter but slower and more expensive. The app makes this a first-class dimensio
 
 - **Effort tradeoff panel** — for models where Artificial Analysis measured ≥2
   effort levels, a **3D scatter using the same axes, ball sizing, and color modes
-  as the main chart**, with each model's effort levels connected as a trajectory
-  (off → max). Color by **effort level** or **provider**; the **best level** (★)
-  is picked by the current cost/speed/intelligence weight sliders. Per-level
-  tables with cost, source and value sit in an expander below.
+  as the main chart**. Each model's effort levels are joined by **edges colored by
+  the level reached** (hover an edge for that step's Δintelligence / Δspeed), and a
+  **color key** below the chart explains the effort or provider colors. The
+  **best level** (★) is picked by the cost/speed/intelligence weight sliders.
+  Per-level tables with cost, source and value sit in an expander below.
 - **Main chart variants** — *Show effort variants on chart* expands each measured
   model into one ball per level; color them *by effort level* to see the ladder.
 - **Filter & metadata** — *Only models with a measured effort ladder* focuses on
