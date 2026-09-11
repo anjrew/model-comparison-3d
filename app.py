@@ -53,7 +53,7 @@ STATE_KEYS = [
     "sel_continents", "sel_countries",
     "hl_search", "hl_names", "table_search",
     "effort_filter", "effort_ladder_only", "show_effort_variants", "effort_color_mode",
-    "effort_models", "effort_metric",
+    "effort_models", "effort_metric", "effort_color_by",
 ] + [f"rng_{m}_{b}" for m in AXES for b in ("min", "max")]
 
 EFFORT_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -287,7 +287,101 @@ def _effort_cost_str(cost, source):
     return f"{pre}${float(cost):.3f}"
 
 
-def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
+def _hnum(v, fmt="{:.1f}"):
+    return "n/a" if v is None or (isinstance(v, float) and v != v) else fmt.format(v)
+
+
+def _ball_sizes(raw, size_scale, ball_max, log_exp):
+    mapped = pd.to_numeric(raw, errors="coerce")
+    s_lo, s_hi = _BALL_MIN, float(ball_max)
+    good = mapped.dropna()
+    good = good[good > 0] if size_scale in ("Log", "Logᵖ") else good
+    if not len(good):
+        return pd.Series([8] * len(mapped), index=mapped.index)
+    vmax = float(good.max())
+    if size_scale == "Log":
+        fmax = math.log10(max(vmax, 1.0))
+
+        def ratio(v):
+            return math.log10(max(float(v), 1.0)) / fmax
+    elif size_scale == "Logᵖ":
+        p = float(log_exp)
+        fmax = math.log10(max(vmax, 1.0))
+
+        def ratio(v):
+            return (math.log10(max(float(v), 1.0)) / fmax) ** p
+    else:
+        def ratio(v):
+            return float(v) / vmax if vmax > 0 else 0.0
+
+    return mapped.map(
+        lambda v: min(s_hi, max(s_lo, s_hi * ratio(v))) if v == v and v > 0 else s_lo
+    )
+
+
+def build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x):
+    """3D (or 2D fallback) scatter of effort ladders, matching the main chart."""
+    x_axis, y_axis, z_axis = cfg["x_axis"], cfg["y_axis"], cfg["z_axis"]
+    is_3d = cfg["chart_type"] == "3D (WebGL)"
+
+    def axis_vals(rows, row, metric):
+        if metric == "cost":
+            return [r["cost"] for r in rows]
+        if metric == "speed":
+            return [r["speed"] for r in rows]
+        if metric == "intelligence":
+            return [r["intelligence"] for r in rows]
+        return [row["context"]] * len(rows)
+
+    fig = go.Figure()
+    for name, row, rows, best in per_model:
+        pr = sorted(rows, key=lambda r: EFFORT_RANK.get(r["effort"], 99))
+        idx = [pts.index[(pts["name"] == name) & (pts["effort"] == r["effort"])][0] for r in pr]
+        psize = [float(sizes.loc[i]) for i in idx]
+        pc = api.provider_color(row["provider"])
+        mcolors = ([EFFORT_COLOR_MAP.get(r["effort"], "#94A3B8") for r in pr]
+                   if color_by == "Effort level" else pc)
+        line_color = "rgba(148,163,184,0.55)" if color_by == "Effort level" else pc
+        cdata = [[r["effort"], _hnum(r["intelligence"], "{:.1f}"), _hnum(r["speed"], "{:.1f}"),
+                  _effort_cost_str(r["cost"], r["cost_source"]), r["cost_source"],
+                  "n/a" if r["aa_cost"] is None else f"{r['aa_cost']:.3f}",
+                  round(r["value"], 3)] for r in pr]
+        hover = (f"<b>{name}</b><br>Effort: %{{customdata[0]}}"
+                 "<br>Intelligence: %{customdata[1]}<br>Speed: %{customdata[2]}"
+                 "<br>Cost: %{customdata[3]} (%{customdata[4]})"
+                 "<br>AA $/task: %{customdata[5]}<br>Value: %{customdata[6]}<extra></extra>")
+        marker = dict(size=psize, color=mcolors, sizemode="diameter", sizeref=1, sizemin=1,
+                      line=dict(width=1, color="#111827"))
+        if is_3d:
+            fig.add_trace(go.Scatter3d(
+                x=axis_vals(pr, row, x_axis), y=axis_vals(pr, row, y_axis),
+                z=axis_vals(pr, row, z_axis), mode="lines+markers", name=name,
+                line=dict(width=4, color=line_color), marker=marker,
+                customdata=cdata, hovertemplate=hover,
+            ))
+        else:
+            fig.add_trace(go.Scatter(
+                x=axis_vals(pr, row, x_axis), y=axis_vals(pr, row, y_axis),
+                mode="lines+markers", name=name,
+                line=dict(width=3, color=line_color), marker=marker,
+                customdata=cdata, hovertemplate=hover,
+            ))
+    use_log = log_x and x_axis == "cost" and bool((pts["cost"] > 0).all())
+    if is_3d:
+        fig.update_layout(height=680, margin=dict(l=0, r=0, t=30, b=0),
+                          scene=dict(xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
+                                     zaxis_title=AXES[z_axis],
+                                     xaxis=dict(type="log") if use_log else {}))
+    else:
+        fig.update_layout(height=560, margin=dict(l=10, r=10, t=30, b=10),
+                          xaxis_title=AXES[x_axis], yaxis_title=AXES[y_axis],
+                          legend_title="Model")
+        if use_log:
+            fig.update_xaxes(type="log")
+    return fig
+
+
+def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve, cfg):
     st.subheader("🧠 Effort tradeoff")
     st.caption(_EFFORT_CAPTION)
     cand = df[df.apply(_has_effort_ladder, axis=1)].copy()
@@ -306,12 +400,16 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
                          help="Only models where Artificial Analysis measured ≥2 effort levels.")
     if not sel:
         return
-    metric = st.radio(
-        "X axis", ["Speed", "Cost"], horizontal=True, key="effort_metric",
-        help="Speed = intelligence vs latency. Cost = how much intelligence you buy as "
-             "effort (and cost) rises. Costs marked ≈ are estimated, not measured.")
-    use_cost = metric == "Cost"
-    combined = []
+    ctl1, ctl2 = st.columns(2)
+    with ctl1:
+        color_by = st.radio("Color by", ["Effort level", "Provider"], horizontal=True,
+                            key="effort_color_by")
+    with ctl2:
+        st.caption(f"Axes follow the sidebar: {AXES[cfg['x_axis']]} / {AXES[cfg['y_axis']]} / "
+                   f"{AXES[cfg['z_axis']]} · ball size: {cfg['ball_size']}")
+
+    per_model = []
+    points = []
     for name in sel:
         subset = cand[cand["name"] == name].copy()
         subset["_n"] = subset.apply(lambda r: len(_measured_levels(r)), axis=1)
@@ -323,100 +421,55 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
         rows, best = _effort_ladder_rows(row, w_cost, w_speed, w_intel, log_x, curve)
         if not rows:
             continue
-        with st.container(border=True):
-            st.markdown(f"**{name}** · {row['provider']} · "
-                        f"supported: {', '.join(_effort_ordered(row['effort_levels'])) or 'n/a'} "
-                        f"({row['effort_style']})")
-            c1, c2 = st.columns([3, 2])
-            with c1:
-                fig = go.Figure()
-                xs = []
-                for r in rows:
-                    is_best = r["effort"] == best
-                    x = r["cost"] if use_cost else r["speed"]
-                    xs.append(x)
-                    fig.add_trace(go.Scatter(
-                        x=[x], y=[r["intelligence"]],
-                        mode="markers+text",
-                        marker=dict(size=20 if is_best else 12,
-                                    color=EFFORT_COLOR_MAP.get(r["effort"], "#94A3B8"),
-                                    symbol="star" if is_best else "circle",
-                                    line=dict(width=2 if is_best else 0, color="#111827")),
-                        text=[r["effort"]], textposition="top center",
-                        name=r["effort"], showlegend=False,
-                        hovertemplate=(f"<b>{r['effort']}</b><br>Intelligence: {r['intelligence']}"
-                                       f"<br>Speed: {r['speed']}"
-                                       f"<br>Cost: {_effort_cost_str(r['cost'], r['cost_source'])} "
-                                       f"({r['cost_source']})"
-                                       f"<br>Value: {r['value']:.2f}<extra></extra>"),
-                    ))
-                x_title = "Cost ($, lower = cheaper) →" if use_cost else "Speed (1-10) → faster"
-                title = ("Intelligence vs cost across effort" if use_cost
-                         else "Intelligence vs speed across effort")
-                fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10),
-                                  xaxis_title=x_title,
-                                  yaxis_title="Intelligence (1-10) → smarter",
-                                  title=title)
-                pos = [v for v in xs if isinstance(v, (int, float)) and v > 0]
-                if use_cost and len(pos) >= 2 and len(set(pos)) >= 2:
-                    fig.update_xaxes(type="log")
-                st.plotly_chart(fig, use_container_width=True)
-            with c2:
-                trows = []
-                for r in rows:
-                    trows.append({
-                        "Effort": ("★ " if r["effort"] == best else "") + r["effort"],
-                        "Intel": r["intelligence"],
-                        "Speed": r["speed"],
-                        "Cost": _effort_cost_str(r["cost"], r["cost_source"]),
-                        "Cost source": r["cost_source"],
-                        "AA $/task": "n/a" if r["aa_cost"] is None else f"{r['aa_cost']:.3f}",
-                        "Value": round(r["value"], 3),
-                    })
-                st.dataframe(pd.DataFrame(trows), hide_index=True, width="stretch")
-                st.caption("★ = best with the current cost/speed/intelligence weights. "
-                           "≈ and 'Estimated (effort)' = approximated from output-token scaling, not measured.")
-        costs = [r["cost"] for r in rows if r["cost"] and r["cost"] > 0]
-        if len(costs) >= 2:
-            cmin = min(costs)
+        per_model.append((name, row, rows, best))
+        for r in rows:
+            points.append({
+                "name": name, "provider": row["provider"], "effort": r["effort"],
+                "cost": r["cost"], "speed": r["speed"], "intelligence": r["intelligence"],
+                "context": row["context"], "params": row["params"],
+                "cost_source": r["cost_source"], "aa_cost": r["aa_cost"], "value": r["value"],
+            })
+    if not points:
+        return
+    pts = pd.DataFrame(points)
+
+    raw = None
+    if cfg["ball_size"] == "Parameters":
+        raw = pts["params"]
+    elif cfg["ball_size"] == "Context":
+        raw = pts["context"]
+    elif cfg["ball_size"] == "Z-axis value":
+        raw = pts[cfg["z_axis"]]
+    if raw is None:
+        sizes = pd.Series([12] * len(pts), index=pts.index)
+    else:
+        sizes = _ball_sizes(raw, cfg["size_scale"], cfg["ball_max"], cfg["log_exp"])
+
+    fig = build_effort_figure(per_model, pts, sizes, cfg, color_by, log_x)
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("Each line connects a model's effort levels (off → max). "
+               "Hover a ball for its measured/estimated cost and the weighted value. "
+               "≈ and 'Estimated (effort)' mark approximated cost.")
+
+    with st.expander("Per-model effort tables", expanded=False):
+        for name, row, rows, best in per_model:
+            st.markdown(f"**{name}** · {row['provider']} · supported: "
+                        f"{', '.join(_effort_ordered(row['effort_levels'])) or 'n/a'} "
+                        f"({row['effort_style']}) · ★ best: **{best}**")
+            trows = []
             for r in rows:
-                if r["cost"] and r["cost"] > 0:
-                    combined.append({"model": name, "effort": r["effort"],
-                                     "intel": r["intelligence"], "rel": r["cost"] / cmin,
-                                     "cost": r["cost"], "cost_source": r["cost_source"]})
-    if len({p["model"] for p in combined}) >= 2:
-        with st.expander("📈 Intelligence vs relative cost — across selected models", expanded=True):
-            st.caption(
-                "X = how many times more expensive an effort level is than that model's cheapest "
-                "effort, so models are compared on a common scale. Shows what each extra unit of "
-                "cost buys in intelligence. The steeper the rise, the better the value of extra effort."
-            )
-            fig = go.Figure()
-            for name in sel:
-                pts = sorted((p for p in combined if p["model"] == name),
-                             key=lambda p: EFFORT_RANK.get(p["effort"], 99))
-                if not pts:
-                    continue
-                fig.add_trace(go.Scatter(
-                    x=[p["rel"] for p in pts], y=[p["intel"] for p in pts],
-                    mode="lines+markers+text",
-                    text=[p["effort"] for p in pts], textposition="top center",
-                    name=name[:44],
-                    marker=dict(size=10,
-                                color=[EFFORT_COLOR_MAP.get(p["effort"], "#94A3B8") for p in pts],
-                                line=dict(width=1, color="#ffffff")),
-                    line=dict(width=2),
-                    customdata=[[_effort_cost_str(p["cost"], p["cost_source"]), p["cost_source"]]
-                                for p in pts],
-                    hovertemplate=("<b>%{fullData.name}</b><br>Effort: %{text}"
-                                   "<br>Intelligence: %{y}<br>Relative cost: %{x:.2f}×"
-                                   "<br>Cost: %{customdata[0]} (%{customdata[1]})<extra></extra>"),
-                ))
-            fig.update_layout(height=430, margin=dict(l=10, r=10, t=30, b=10),
-                              xaxis_title="Relative cost (× that model's cheapest effort) →",
-                              yaxis_title="Intelligence (1-10) → smarter",
-                              legend_title="Model")
-            st.plotly_chart(fig, use_container_width=True)
+                trows.append({
+                    "Effort": ("★ " if r["effort"] == best else "") + r["effort"],
+                    "Intel": r["intelligence"],
+                    "Speed": r["speed"],
+                    "Cost": _effort_cost_str(r["cost"], r["cost_source"]),
+                    "Cost source": r["cost_source"],
+                    "AA $/task": "n/a" if r["aa_cost"] is None else f"{r['aa_cost']:.3f}",
+                    "Value": round(r["value"], 3),
+                })
+            st.dataframe(pd.DataFrame(trows), hide_index=True, width="stretch")
+    st.caption("★ = best with the current cost/speed/intelligence weights. "
+               "≈ and 'Estimated (effort)' = approximated from output-token scaling, not measured.")
 
 
 def _metric_axis_range(visible, metric):
@@ -983,32 +1036,8 @@ def main():
     if raw is None:
         sizes = pd.Series([10] * len(plot_df), index=plot_df.index)
     else:
-        s_lo, s_hi = _BALL_MIN, float(st.session_state.get("ball_max", 60))
-        mapped = pd.to_numeric(raw, errors="coerce")
-        good = mapped.dropna()
-        good = good[good > 0] if size_scale in ("Log", "Logᵖ") else good
-        if len(good):
-            vmax = float(good.max())
-            if size_scale == "Log":
-                fmax = math.log10(max(vmax, 1.0))
-
-                def ratio(v):
-                    return math.log10(max(float(v), 1.0)) / fmax
-            elif size_scale == "Logᵖ":
-                p = float(st.session_state.get("log_exp", 1.0))
-                fmax = math.log10(max(vmax, 1.0))
-
-                def ratio(v):
-                    return (math.log10(max(float(v), 1.0)) / fmax) ** p
-            else:
-                def ratio(v):
-                    return float(v) / vmax if vmax > 0 else 0.0
-
-            sizes = mapped.map(
-                lambda v: min(s_hi, max(s_lo, s_hi * ratio(v))) if v == v and v > 0 else s_lo
-            )
-        else:
-            sizes = pd.Series([8] * len(plot_df), index=plot_df.index)
+        sizes = _ball_sizes(raw, size_scale, st.session_state.get("ball_max", 60),
+                            st.session_state.get("log_exp", 1.0))
 
     print(f"[ball-size] {size_label} · scale={size_scale} · min={float(sizes.min()):.1f}px "
           f"max={float(sizes.max()):.1f}px · distinct={int(sizes.nunique())}", flush=True)
@@ -1017,9 +1046,6 @@ def main():
                   "Effort", "Effort levels", "Best effort", "Effort cost", "Effort cost source",
                   "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s",
                   "Ball size (px)"]
-
-    def _hnum(v, fmt="{:.1f}"):
-        return "n/a" if v is None or (isinstance(v, float) and v != v) else fmt.format(v)
 
     hdata = plot_df.copy()
     hdata["_bsize"] = sizes
@@ -1164,7 +1190,15 @@ def main():
         st.caption(f"Effort variants on: {len(plot_df):,} points ({len(plot_df) - len(visible):,} extra balls). "
                    "Variant cost uses the model's base input price; per-level cost is in the Effort tradeoff panel below.")
 
-    render_effort_panel(visible, hl_names, w_cost, w_speed, w_intel, log_x, field_curve)
+    render_effort_panel(
+        visible, hl_names, w_cost, w_speed, w_intel, log_x, field_curve,
+        {
+            "x_axis": x_axis, "y_axis": y_axis, "z_axis": z_axis,
+            "chart_type": chart_type, "ball_size": ball_size, "size_scale": size_scale,
+            "ball_max": st.session_state.get("ball_max", 60),
+            "log_exp": st.session_state.get("log_exp", 1.0),
+        },
+    )
 
     st.subheader("Table")
     table_search = st.text_input("Search table (matches any column)", key="table_search")
