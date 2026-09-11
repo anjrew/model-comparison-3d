@@ -306,6 +306,12 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
                          help="Only models where Artificial Analysis measured ≥2 effort levels.")
     if not sel:
         return
+    metric = st.radio(
+        "X axis", ["Speed", "Cost"], horizontal=True, key="effort_metric",
+        help="Speed = intelligence vs latency. Cost = how much intelligence you buy as "
+             "effort (and cost) rises. Costs marked ≈ are estimated, not measured.")
+    use_cost = metric == "Cost"
+    combined = []
     for name in sel:
         subset = cand[cand["name"] == name].copy()
         subset["_n"] = subset.apply(lambda r: len(_measured_levels(r)), axis=1)
@@ -324,10 +330,13 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
             c1, c2 = st.columns([3, 2])
             with c1:
                 fig = go.Figure()
+                xs = []
                 for r in rows:
                     is_best = r["effort"] == best
+                    x = r["cost"] if use_cost else r["speed"]
+                    xs.append(x)
                     fig.add_trace(go.Scatter(
-                        x=[r["speed"]], y=[r["intelligence"]],
+                        x=[x], y=[r["intelligence"]],
                         mode="markers+text",
                         marker=dict(size=20 if is_best else 12,
                                     color=EFFORT_COLOR_MAP.get(r["effort"], "#94A3B8"),
@@ -341,10 +350,16 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
                                        f"({r['cost_source']})"
                                        f"<br>Value: {r['value']:.2f}<extra></extra>"),
                     ))
+                x_title = "Cost ($, lower = cheaper) →" if use_cost else "Speed (1-10) → faster"
+                title = ("Intelligence vs cost across effort" if use_cost
+                         else "Intelligence vs speed across effort")
                 fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10),
-                                  xaxis_title="Speed (1-10) → faster",
+                                  xaxis_title=x_title,
                                   yaxis_title="Intelligence (1-10) → smarter",
-                                  title="Intelligence vs speed across effort")
+                                  title=title)
+                pos = [v for v in xs if isinstance(v, (int, float)) and v > 0]
+                if use_cost and len(pos) >= 2 and len(set(pos)) >= 2:
+                    fig.update_xaxes(type="log")
                 st.plotly_chart(fig, use_container_width=True)
             with c2:
                 trows = []
@@ -361,6 +376,47 @@ def render_effort_panel(df, hl_names, w_cost, w_speed, w_intel, log_x, curve):
                 st.dataframe(pd.DataFrame(trows), hide_index=True, width="stretch")
                 st.caption("★ = best with the current cost/speed/intelligence weights. "
                            "≈ and 'Estimated (effort)' = approximated from output-token scaling, not measured.")
+        costs = [r["cost"] for r in rows if r["cost"] and r["cost"] > 0]
+        if len(costs) >= 2:
+            cmin = min(costs)
+            for r in rows:
+                if r["cost"] and r["cost"] > 0:
+                    combined.append({"model": name, "effort": r["effort"],
+                                     "intel": r["intelligence"], "rel": r["cost"] / cmin,
+                                     "cost": r["cost"], "cost_source": r["cost_source"]})
+    if len({p["model"] for p in combined}) >= 2:
+        with st.expander("📈 Intelligence vs relative cost — across selected models", expanded=True):
+            st.caption(
+                "X = how many times more expensive an effort level is than that model's cheapest "
+                "effort, so models are compared on a common scale. Shows what each extra unit of "
+                "cost buys in intelligence. The steeper the rise, the better the value of extra effort."
+            )
+            fig = go.Figure()
+            for name in sel:
+                pts = sorted((p for p in combined if p["model"] == name),
+                             key=lambda p: EFFORT_RANK.get(p["effort"], 99))
+                if not pts:
+                    continue
+                fig.add_trace(go.Scatter(
+                    x=[p["rel"] for p in pts], y=[p["intel"] for p in pts],
+                    mode="lines+markers+text",
+                    text=[p["effort"] for p in pts], textposition="top center",
+                    name=name[:44],
+                    marker=dict(size=10,
+                                color=[EFFORT_COLOR_MAP.get(p["effort"], "#94A3B8") for p in pts],
+                                line=dict(width=1, color="#ffffff")),
+                    line=dict(width=2),
+                    customdata=[[_effort_cost_str(p["cost"], p["cost_source"]), p["cost_source"]]
+                                for p in pts],
+                    hovertemplate=("<b>%{fullData.name}</b><br>Effort: %{text}"
+                                   "<br>Intelligence: %{y}<br>Relative cost: %{x:.2f}×"
+                                   "<br>Cost: %{customdata[0]} (%{customdata[1]})<extra></extra>"),
+                ))
+            fig.update_layout(height=430, margin=dict(l=10, r=10, t=30, b=10),
+                              xaxis_title="Relative cost (× that model's cheapest effort) →",
+                              yaxis_title="Intelligence (1-10) → smarter",
+                              legend_title="Model")
+            st.plotly_chart(fig, use_container_width=True)
 
 
 def _metric_axis_range(visible, metric):

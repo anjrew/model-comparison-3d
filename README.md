@@ -47,9 +47,12 @@ Reasoning models can be told *how hard to think* before answering. Levels run
 smarter but slower and more expensive. The app makes this a first-class dimension:
 
 - **Effort tradeoff panel** — for models where Artificial Analysis measured ≥2
-  effort levels, a point-per-level chart of intelligence vs speed, with the
-  **best level** (★) picked by the current cost/speed/intelligence weight sliders,
-  plus a per-level table.
+  effort levels, a point-per-level chart of intelligence vs **speed or cost**
+  (switch the X axis), with the **best level** (★) picked by the current
+  cost/speed/intelligence weight sliders, plus a per-level table.
+- **Intelligence vs relative cost** — a combined chart across the selected models
+  showing what each extra unit of cost buys in intelligence (X = × the model's
+  cheapest effort), so the value of pushing effort higher is comparable model to model.
 - **Main chart variants** — *Show effort variants on chart* expands each measured
   model into one ball per level; color them *by effort level* to see the ladder.
 - **Filter & metadata** — *Only models with a measured effort ladder* focuses on
