@@ -259,18 +259,18 @@ def _best_effort_meta(row, w_cost, w_speed, w_intel, log_x, curve=1.0):
 
 def _expand_effort(visible):
     rows = []
-    for _, r in visible.iterrows():
+    for r in visible.to_dict("records"):
         measured = _measured_levels(r)
         levels = _effort_ordered(list(measured.keys()))
         if len(levels) < 2:
-            d = r.copy()
+            d = dict(r)
             ae = r.get("aa_effort")
             d["effort"] = ae if ae in EFFORT_RANK else None
             rows.append(d)
             continue
         for e in levels:
             v = measured[e]
-            d = r.copy()
+            d = dict(r)
             d["effort"] = e
             if v.get("intelligence") is not None:
                 d["intelligence"] = v["intelligence"]
@@ -546,6 +546,11 @@ def get_aa(key):
         return None
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_scored(catalog, custom_models, aa):
+    return api.apply_scores(list(catalog) + list(custom_models), aa=aa)
+
+
 def main():
     st.set_page_config(page_title="LLM 3D Model Compare", page_icon="📊", layout="wide")
 
@@ -595,8 +600,7 @@ def main():
     aa_key = st.session_state.aa_key_input.strip() or None
     aa = get_aa(aa_key) if aa_key else None
 
-    models = catalog + st.session_state.custom_models
-    scored = api.apply_scores(models, aa=aa)
+    scored = get_scored(catalog, st.session_state.custom_models, aa)
     df = pd.DataFrame(scored)
 
     no_ctx = df["context"].isna() | (df["context"] <= 0)

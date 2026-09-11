@@ -249,38 +249,50 @@ def _aa_base_name(name):
     return re.sub(r"\s*(non-reasoning|reasoning|thinking)\s*$", "", n).strip()
 
 
-def _aa_groups(aa):
-    groups = {}
+def build_aa_index(aa):
+    """Precompute AA lookup structures once (groups, exact map, fuzzy candidates)."""
+    groups, exact, entries = {}, {}, []
+    if not aa:
+        return groups, exact, entries
     for rec in aa.values():
         if not isinstance(rec, dict):
             continue
-        b = _norm(_aa_base_name(rec.get("name") or rec.get("slug") or ""))
-        if b:
-            groups.setdefault(b, []).append(rec)
-    for recs in groups.values():
+        name = rec.get("name") or rec.get("slug") or ""
+        key = _norm(_aa_base_name(name))
+        if key:
+            groups.setdefault(key, []).append(rec)
+    for key, recs in groups.items():
         recs.sort(key=lambda r: (
             r.get("effort") not in EFFORT_ORDER,
             EFFORT_ORDER.index(r["effort"]) if r.get("effort") in EFFORT_ORDER else 99,
         ))
-    return groups
-
-
-def match_aa_ladder(model, aa):
-    target = _norm(model["id"].rsplit("/", 1)[-1]) or _norm(model.get("name") or "")
-    if not target or not aa:
-        return []
-    groups = _aa_groups(aa)
-    best_key, best_score = None, -1
-    for key, recs in groups.items():
         for rec in recs:
             sn = _norm(rec.get("slug") or "")
             nn = _norm(rec.get("name") or "")
-            if sn == target or nn == target:
-                return recs
-            for cand in (sn, nn):
-                if len(cand) >= 5 and (cand in target or target in cand) and len(cand) > best_score:
-                    best_score = len(cand)
-                    best_key = key
+            if sn:
+                exact.setdefault(sn, key)
+            if nn:
+                exact.setdefault(nn, key)
+            entries.append((sn, nn, key))
+    return groups, exact, entries
+
+
+def match_aa_ladder(model, aa=None, index=None):
+    target = _norm(model["id"].rsplit("/", 1)[-1]) or _norm(model.get("name") or "")
+    if not target:
+        return []
+    if index is None:
+        index = build_aa_index(aa)
+    groups, exact, entries = index
+    key = exact.get(target)
+    if key:
+        return groups[key]
+    best_key, best_score = None, -1
+    for sn, nn, k in entries:
+        for cand in (sn, nn):
+            if len(cand) >= 5 and (cand in target or target in cand) and len(cand) > best_score:
+                best_score = len(cand)
+                best_key = k
     return groups.get(best_key, []) if best_key else []
 
 
@@ -364,13 +376,14 @@ def _ladder_entry(rec):
 
 def apply_scores(models, aa=None):
     out = []
+    index = build_aa_index(aa)
     for m in models:
         row = dict(m)
         preset = bool(row.get("scores_live"))
         live = False
         intelligence = row.get("intelligence")
         speed = row.get("speed")
-        ladder = match_aa_ladder(m, aa) if aa else []
+        ladder = match_aa_ladder(m, index=index) if aa else []
         row["effort_ladder"] = [_ladder_entry(r) for r in ladder]
         if aa:
             hit = _pick_default_variant(m, ladder)
