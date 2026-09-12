@@ -51,6 +51,7 @@ STATE_KEYS = [
     "w_cost", "w_speed", "w_intel",
     "search", "show_all", "prov_search", "sel_providers",
     "reasoning_only", "open_weights", "sel_sources", "min_context", "max_context",
+    "max_vram",
     "sel_continents", "sel_countries",
     "hl_search", "hl_names", "table_search",
     "effort_filter", "effort_ladder_only", "show_effort_variants", "effort_color_mode",
@@ -921,6 +922,15 @@ def main():
             with ctx_c2:
                 max_context = st.number_input("Max", min_value=0, step=16, value=0, key="max_context")
 
+            st.caption("Hardware requirement")
+            max_vram = st.selectbox(
+                "Max VRAM (GB)",
+                ["Any", "8", "12", "16", "24", "48", "80", "128"],
+                key="max_vram",
+                help="Estimated GPU memory to run the model (fp16 ≈ 2× params). "
+                     "Filters to models that fit in the chosen VRAM budget.",
+            )
+
             st.caption("Origin")
             continent_opts = sorted([c for c in df["continent"].dropna().unique()])
             country_opts = sorted([c for c in df["country"].dropna().unique()])
@@ -1031,6 +1041,8 @@ def main():
         visible = visible[visible["context"] >= min_context * 1000]
     if max_context:
         visible = visible[visible["context"] <= max_context * 1000]
+    if max_vram != "Any":
+        visible = visible[visible["vram_gb"].notna() & (visible["vram_gb"] <= int(max_vram))]
     if sel_continents:
         visible = visible[visible["continent"].isin(sel_continents)]
     if sel_countries:
@@ -1110,7 +1122,7 @@ def main():
 
     hover_cols = ["Provider", "Cost ($/1M in)", "Speed (1-10)", "Intelligence (1-10)", "Score source",
                   "Effort", "Effort levels", "Best effort", "Effort cost", "Effort cost source",
-                  "Context", "Params (B)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s",
+                  "Context", "Params (B)", "VRAM (GB, est)", "Country", "Reasoning", "AA Intell. Index", "AA tokens/s",
                   "Ball size (px)"]
 
     hdata = plot_df.copy()
@@ -1130,6 +1142,7 @@ def main():
     hdata["Effort cost source"] = hdata["effort_cost_src"].map(lambda s: s or "n/a")
     hdata["Context"] = hdata["context"].map(lambda v: _hnum(v, "{:,.0f}"))
     hdata["Params (B)"] = hdata["params"].map(lambda v: _hnum(v, "{:.1f}"))
+    hdata["VRAM (GB, est)"] = hdata["vram_gb"].map(lambda v: _hnum(v, "{:.1f}")) if "vram_gb" in hdata.columns else "n/a"
     hdata["Country"] = hdata["country"].fillna("n/a")
     hdata["Reasoning"] = hdata["reasoning"].map(lambda v: "Yes" if v else "No")
     hdata["AA Intell. Index"] = hdata["aa_intelligence_index"].map(lambda v: _hnum(v, "{:.1f}")) if "aa_intelligence_index" in hdata.columns else "n/a"
@@ -1158,19 +1171,19 @@ def main():
                                 range_color=value_range,
                                 size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
-                                custom_data=["_ring"], text=None, title=None)
+                                custom_data=["_ring", "name"], text=None, title=None)
         elif use_effort_color:
             fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="effort", color_discrete_map=EFFORT_COLOR_MAP,
                                 size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
-                                custom_data=["_ring"], text=None, title=None)
+                                custom_data=["_ring", "name"], text=None, title=None)
         else:
             fig = px.scatter_3d(hdata, x=x_axis, y=y_axis, z=z_axis,
                                 color="provider", color_discrete_map=color_map,
                                 size="_bsize", size_max=200,
                                 hover_name="name", hover_data=hover_data,
-                                custom_data=["_ring"], text=None, title=None)
+                                custom_data=["_ring", "name"], text=None, title=None)
         if show_field and len(visible) >= 4:
             surfs = _adaptive_surfaces(visible, df, x_axis, y_axis, z_axis, log_x, field_surfaces)
             fig.add_trace(build_value_field(visible, x_axis, y_axis, z_axis, log_x,
@@ -1207,18 +1220,18 @@ def main():
                              color_continuous_scale=VALUE_SCALE, range_color=value_range,
                              size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data,
-                             custom_data=["_ring"], title=None)
+                             custom_data=["_ring", "name"], title=None)
         elif use_effort_color:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="effort",
                              color_discrete_map=EFFORT_COLOR_MAP,
                              size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data,
-                             custom_data=["_ring"], title=None)
+                             custom_data=["_ring", "name"], title=None)
         else:
             fig = px.scatter(hdata, x=x_axis, y=y_axis, color="provider", color_discrete_map=color_map,
                              size="_bsize", size_max=200,
                              hover_name="name", hover_data=hover_data,
-                             custom_data=["_ring"], title=None)
+                             custom_data=["_ring", "name"], title=None)
         fig.update_traces(marker=dict(sizemode="diameter", sizeref=1, sizemin=1, opacity=base_opac))
         _apply_live_outline(fig)
         if len(hl_names):
@@ -1246,7 +1259,41 @@ def main():
 
     _apply_axis_ranges(fig, chart_type, x_axis, y_axis, z_axis, log_x, plot_df)
 
-    st.plotly_chart(fig, use_container_width=True)
+    event = st.plotly_chart(fig, use_container_width=True, on_select="rerun", selection_mode="points")
+    _name_set = set(plot_df["name"])
+    if event is not None and getattr(event, "selection", None) and event.selection.get("points"):
+        cd = event.selection["points"][0].get("customdata")
+        nm = None
+        if isinstance(cd, (list, tuple)):
+            for item in cd:
+                if isinstance(item, str) and item in _name_set:
+                    nm = item
+                    break
+        if nm:
+            st.session_state["clicked_model"] = nm
+
+    clicked = st.session_state.get("clicked_model")
+    if clicked:
+        match = plot_df[plot_df["name"] == clicked]
+        if not match.empty:
+            r = match.iloc[0]
+            st.subheader(f"🔍 {clicked}")
+            _details = {
+                "Provider": r["provider"],
+                "Cost ($/1M in)": f"{r['cost']:.2f}",
+                "Speed (1-10)": f"{r['speed']:.1f}",
+                "Intelligence (1-10)": f"{r['intelligence']:.1f}",
+                "Context (tokens)": f"{r['context']:,.0f}",
+                "Params (B)": _hnum(r.get("params"), "{:.1f}"),
+                "VRAM (GB, est)": _hnum(r.get("vram_gb"), "{:.1f}"),
+                "Country": str(r.get("country") or "n/a"),
+                "Reasoning": "Yes" if r.get("reasoning") else "No",
+                "Open weights": "Yes" if r.get("open_weights") else "No",
+            }
+            _text = "\n".join(f"{k}: {v}" for k, v in _details.items())
+            st.code(_text, language="text")
+            st.caption("Click the copy icon in the code block's corner to copy the details.")
+
     st.caption(f"Ball size: {size_label} · {float(sizes.min()):.0f}–{float(sizes.max()):.0f} px · {int(sizes.nunique()):,} distinct")
     if ring_mask.any():
         st.caption(f"Balls with a cyan outline = intelligence & speed measured by Artificial Analysis ({int(ring_mask.sum()):,}); plain balls = heuristic estimates.")

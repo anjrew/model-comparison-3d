@@ -451,6 +451,7 @@ def apply_scores(models, aa=None):
             row["params_est"] = True
         else:
             row["params_est"] = False
+        row["vram_gb"] = round(row["params"] * 2, 1) if row.get("params") is not None else None
         row.setdefault("effort_levels", [])
         row.setdefault("effort_style", "none")
         out.append(row)
