@@ -23,7 +23,7 @@ Every model's **Intelligence (1–10)** comes from one of two places. The app te
 | | Intelligence & speed source | When |
 | --- | --- | --- |
 | **Live** | [Artificial Analysis](https://artificialanalysis.ai) index (rescaled: index ÷ 7 → 1–10) | AA key set **and** the model is matched to an AA entry |
-| **Estimated** | local heuristic — starts at 6.2, +1.0 reasoning, +0.8 frontier-family name, +0.5 if input cost ≥ $2.50/M, capped at 10 | no key, or no AA match |
+| **Estimated** | local heuristic — starts at a low 2.0, then adds for reasoning (+1.3), frontier-family name (+1.3), higher input cost (up to +1.0) and long context / large parameter count, and subtracts for tiny parameter count, sub-128k context, rock-bottom pricing and pre-2025 release dates; clamped to 1–10 | no key, or no AA match |
 
 Highlighted in **four places**:
 

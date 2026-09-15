@@ -459,15 +459,43 @@ def apply_scores(models, aa=None):
 
 
 def estimate_intelligence(m):
-    s = 6.2
-    if m["reasoning"]:
-        s += 1.0
+    s = 2.0
     name = m["name"].lower()
+    if m["reasoning"]:
+        s += 1.3
     if any(k in name for k in _FRONTIER):
-        s += 0.8
-    if m["cost"] >= 2.5:
-        s += 0.5
-    s = min(10.0, s)
+        s += 1.3
+    cost = m["cost"] or 0
+    if cost >= 15:
+        s += 1.0
+    elif cost >= 5:
+        s += 0.7
+    elif cost >= 1.5:
+        s += 0.4
+    elif cost < 0.15:
+        s -= 0.6
+    ctx = m["context"] or 0
+    if ctx and ctx < 32000:
+        s -= 0.9
+    elif ctx and ctx < 128000:
+        s -= 0.4
+    elif ctx >= 200000:
+        s += 0.3
+    params = m.get("params")
+    if params:
+        if params < 10:
+            s -= 0.9
+        elif params < 30:
+            s -= 0.3
+        elif params >= 200:
+            s += 0.5
+    year = (m.get("release_date") or "")[:4]
+    if year.isdigit():
+        if int(year) <= 2023:
+            s -= 0.8
+        elif int(year) == 2024:
+            s -= 0.3
+    s = max(1.0, min(10.0, s))
     return round(s, 1)
 
 
